@@ -1,20 +1,30 @@
 {
   "type": "object",
+  "additionalProperties": false,
   "required": ["ideas"],
   "properties": {
     "ideas": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["title","primary_keyword","supporting_keywords","angle","intent"],
+        "additionalProperties": false,
+        "required": ["title", "primary_keyword", "supporting_keywords", "angle", "intent"],
         "properties": {
           "title": { "type": "string" },
           "primary_keyword": { "type": "string" },
-          "supporting_keywords": { "type": "array", "items": { "type": "string" }, "minItems": 2 },
+          "supporting_keywords": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "2–5 supporting keywords"
+          },
           "angle": { "type": "string" },
-          "intent": { "type": "string", "enum": ["informational","comparison","how-to","myth-vs-fact","safety","nutrition","science-explainer"] }
+          "intent": {
+            "type": "string",
+            "enum": ["informational", "comparison", "how-to", "myth-vs-fact", "safety", "nutrition", "science-explainer"]
+          }
         }
-      }
+      },
+      "description": "List of keyword ideas"
     }
   }
 }

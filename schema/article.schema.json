@@ -1,40 +1,43 @@
 {
   "type": "object",
-  "required": ["title","slug","summary","body_markdown","faq","references","tags"],
+  "additionalProperties": false,
+  "required": ["title", "slug", "summary", "body_markdown", "faq", "references", "tags"],
   "properties": {
-    "title": { "type": "string", "minLength": 20, "maxLength": 65 },
-    "slug": { "type": "string", "pattern": "^[a-z0-9-]{6,}$" },
-    "summary": { "type": "string", "maxLength": 180 },
-    "body_markdown": { "type": "string", "minLength": 1200 },
+    "title": { "type": "string", "description": "SEO title (20–65 chars recommended)" },
+    "slug":  { "type": "string", "description": "kebab-case URL slug" },
+    "summary": { "type": "string", "description": "Meta description style summary" },
+    "body_markdown": { "type": "string", "description": "Article body in Markdown, text-only" },
     "faq": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["q","a"],
+        "additionalProperties": false,
+        "required": ["q", "a"],
         "properties": {
           "q": { "type": "string" },
           "a": { "type": "string" }
         }
       },
-      "minItems": 4
+      "description": "List of Q&A objects"
     },
     "references": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["title","pmid","url"],
+        "additionalProperties": false,
+        "required": ["title", "pmid", "url"],
         "properties": {
           "title": { "type": "string" },
-          "pmid": { "type": "string" },
-          "url": { "type": "string" }
+          "pmid":  { "type": "string" },
+          "url":   { "type": "string" }
         }
       },
-      "minItems": 3
+      "description": "List of PubMed references used"
     },
     "tags": {
       "type": "array",
       "items": { "type": "string" },
-      "minItems": 3
+      "description": "Topical tags (3–6 recommended)"
     }
   }
 }
