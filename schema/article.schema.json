@@ -1,0 +1,40 @@
+{
+  "type": "object",
+  "required": ["title","slug","summary","body_markdown","faq","references","tags"],
+  "properties": {
+    "title": { "type": "string", "minLength": 20, "maxLength": 65 },
+    "slug": { "type": "string", "pattern": "^[a-z0-9-]{6,}$" },
+    "summary": { "type": "string", "maxLength": 180 },
+    "body_markdown": { "type": "string", "minLength": 1200 },
+    "faq": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["q","a"],
+        "properties": {
+          "q": { "type": "string" },
+          "a": { "type": "string" }
+        }
+      },
+      "minItems": 4
+    },
+    "references": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["title","pmid","url"],
+        "properties": {
+          "title": { "type": "string" },
+          "pmid": { "type": "string" },
+          "url": { "type": "string" }
+        }
+      },
+      "minItems": 3
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 3
+    }
+  }
+}
