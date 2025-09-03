@@ -1,12 +1,12 @@
 {
   "type": "object",
   "additionalProperties": false,
-  "required": ["title", "slug", "summary", "body_markdown", "faq", "references", "tags"],
+  "required": ["title", "slug", "summary", "body_markdown", "faq", "references", "tags", "subject"],
   "properties": {
-    "title": { "type": "string", "description": "SEO title (20–65 chars recommended)" },
-    "slug":  { "type": "string", "description": "kebab-case URL slug" },
-    "summary": { "type": "string", "description": "Meta description style summary" },
-    "body_markdown": { "type": "string", "description": "Article body in Markdown, text-only" },
+    "title":        { "type": "string", "description": "SEO title (20–65 chars recommended)" },
+    "slug":         { "type": "string", "description": "kebab-case URL slug" },
+    "summary":      { "type": "string", "description": "Meta description style summary" },
+    "body_markdown":{ "type": "string", "description": "Article body in Markdown, text-only" },
     "faq": {
       "type": "array",
       "items": {
@@ -38,6 +38,10 @@
       "type": "array",
       "items": { "type": "string" },
       "description": "Topical tags (3–6 recommended)"
+    },
+    "subject": {
+      "type": "string",
+      "description": "The selected idea/topic; must match the requested subject."
     }
   }
 }
