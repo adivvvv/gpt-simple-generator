@@ -153,6 +153,40 @@ final class OpenAIService
         return [];
     }
 
+    /** Translate a subject/title to target $lang and return the translated string. */
+    public function translateSubject(string $subject, string $lang): string
+    {
+        $schema = [
+            'type' => 'object',
+            'required' => ['subject'],
+            'additionalProperties' => false,
+            'properties' => [
+                'subject' => ['type'=>'string']
+            ]
+        ];
+
+        $system = "Translate the given subject/title into {$lang}. Preserve meaning, brevity, and key terms (e.g., 'camel milk'). Return ONLY JSON with a single field 'subject'.";
+        $inputBlocks = [
+            ['role'=>'system','content'=>[['type'=>'input_text','text'=>$system]]],
+            ['role'=>'user','content'=>[['type'=>'input_text','text'=>"SUBJECT:\n".$subject]]],
+        ];
+
+        try {
+            $out = $this->responsesCall(
+                model: Env::get('OPENAI_MODEL_UTIL', Env::get('OPENAI_MODEL_ARTICLE', 'gpt-5-mini')),
+                inputBlocks: $inputBlocks,
+                schemaName: 'translate_schema',
+                schema: $schema,
+                temperature: 0.2
+            );
+            $candidate = (string)($out['subject'] ?? '');
+            return $candidate !== '' ? $candidate : $subject;
+        } catch (\Throwable $e) {
+            Logger::error('translateSubject failed', ['err'=>$e->getMessage()]);
+            return $subject;
+        }
+    }
+
     private function responsesCall(string $model, array $inputBlocks, string $schemaName, array $schema, float $temperature): array
     {
         $apiKey = Env::get('OPENAI_API_KEY', '');

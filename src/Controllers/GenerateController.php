@@ -30,21 +30,35 @@ final class GenerateController
             Http::json(['error' => 'Invalid lang'], 422);
         }
 
-        // 1) SUBJECT comes from the ideas pool (always).
+        // 1) SUBJECT: try local pool first
         $subject = (string)($body['subject'] ?? '');
         if ($subject === '') {
             $store = new IdeaStore($lang);
             $ideas = $store->list(1, true);
             $subject = (string)($ideas[0]['title'] ?? '');
         }
+
+        // 2) If still empty, fallback to EN pool and translate if needed
         if ($subject === '') {
-            Http::json(['error' => 'No subject available in ideas pool; seed ideas first.'], 409);
+            $storeEn = new IdeaStore('en');
+            $ideasEn = $storeEn->list(1, true);
+            $subject = (string)($ideasEn[0]['title'] ?? '');
+            if ($subject === '') {
+                Http::json(['error' => 'No subject available; seed ideas first.'], 409);
+            }
+            if ($lang !== 'en') {
+                $translator = new OpenAIService();
+                $subjectTr = $translator->translateSubject($subject, $lang);
+                if (is_string($subjectTr) && $subjectTr !== '') {
+                    $subject = $subjectTr;
+                }
+            }
         }
 
-        // 2) KEYWORDS are always just ["camel milk"] as requested.
+        // 3) Fixed keywords policy
         $keywords = ['camel milk'];
 
-        // 3) PubMed refs can still be fetched from the (fixed) keyword.
+        // 4) PubMed refs using fixed keyword(s)
         $pubmed = new PubMedService();
         $refs   = $pubmed->context($lang, $keywords, (int)(Env::get('PUBMED_RETMAX', '12')));
 
