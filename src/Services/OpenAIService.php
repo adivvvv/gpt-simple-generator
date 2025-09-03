@@ -18,7 +18,7 @@ final class OpenAIService
     {
         $this->http = $http ?: new Client([
             'base_uri' => 'https://api.openai.com/v1/',
-            'timeout'  => 45,
+            'timeout'  => 120,
         ]);
     }
 
