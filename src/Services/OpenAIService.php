@@ -17,19 +17,14 @@ final class OpenAIService
     public function __construct(?Client $http = null)
     {
         $this->http = $http ?: new Client([
-            'base_uri' => 'https://api.openai.com/v1/',
-            'timeout'  => 120,
+            'base_uri'        => 'https://api.openai.com/v1/',
+            'timeout'         => (float)(Env::get('OPENAI_TIMEOUT', '120')),
+            'connect_timeout' => (float)(Env::get('OPENAI_CONNECT_TIMEOUT', '10')),
         ]);
     }
 
     /**
      * Generate a full article as strict JSON per article.schema.json
-     * Extra controls:
-     *  - leadStyle: string (e.g., "myth-busting", "surprising-stat", "question", "historical-note", "case-context", "analogy")
-     *  - minSentencesPerParagraph: int
-     *  - pmidMode: "none"|"limited"
-     *  - maxInlinePmids: int (used when pmidMode = "limited")
-     *  - banPhrases: string[] (phrases to avoid anywhere, esp. in the intro)
      */
     public function generateArticle(array $payload, array $refs, array $schema): array
     {
@@ -55,17 +50,14 @@ final class OpenAIService
         $system = implode("\n", [
             "You are a careful scientific editor writing in {$lang}.",
             "Goals:",
-            "- Start with a UNIQUE, non-generic introduction using the lead style: {$lead}. Do NOT reuse boilerplate.",
-            "- Use a varied opening device (e.g., a pointed question, surprising data, myth-busting, short historical note, practical scenario, or crisp analogy).",
-            "- Structure: target {$payload['paragraphs']} paragraphs; EACH paragraph must have at least {$minSp} sentences (full-stops, not fragments).",
-            "- Summarize evidence and mechanisms clearly and neutrally; no medical advice; EU-compliant tone.",
-            "- FAQs: include {$payload['faqCount']} questions/answers (plain text).",
+            "- Start with a UNIQUE, non-generic introduction using the lead style: {$lead}.",
+            "- Structure: target {$payload['paragraphs']} paragraphs; EACH paragraph must have at least {$minSp} sentences.",
+            "- Summarize evidence neutrally; no medical advice; EU-compliant tone.",
+            "- FAQs: include {$payload['faqCount']} Q/A (plain text).",
             "- Citations: {$pmidPolicyText}",
-            "- Never fabricate PMIDs or study data. If uncertain, omit the inline citation.",
             $banListText,
             "Constraints:",
             "- Text-only. No images, no tables.",
-            "- Use consistent terminology in {$lang}.",
             "- If you include PMIDs inline, cite like [PMID:12345678].",
         ]);
 
@@ -106,16 +98,17 @@ final class OpenAIService
             inputBlocks: $inputBlocks,
             schemaName: 'article_schema',
             schema: $schema,
-            temperature: (float)($payload['temperature'] ?? 0.45) // a bit higher for intro diversity
+            temperature: (float)($payload['temperature'] ?? 0.45)
         );
     }
 
-    /** Generate keyword ideas as strict JSON per ideas.schema.json (unchanged) */
+    /** Generate keyword ideas; tolerant to multiple JSON shapes */
     public function generateIdeas(string $lang, array $seeds, int $count): array
     {
         $schema = json_decode(file_get_contents(__DIR__ . '/../../schema/ideas.schema.json'), true);
 
-        $system = "Generate unique, high-intent SEO ideas in {$lang} about camel milk. Return ONLY JSON matching schema; no duplicates; diverse angles.";
+        // Lightweight instruction; schema enforces structure, but we’ll normalize anyway.
+        $system = "Generate unique, high-intent SEO ideas in {$lang} about camel milk. Return JSON only; diverse angles; no duplicates.";
 
         $userJson = json_encode([
             'task' => 'seed_ideas',
@@ -143,11 +136,19 @@ final class OpenAIService
             model: Env::get('OPENAI_MODEL_UTIL', Env::get('OPENAI_MODEL_ARTICLE', 'gpt-5-mini')),
             inputBlocks: $inputBlocks,
             schemaName: 'ideas_schema',
-            schema: $schema,
+            schema: $schema ?: ['type' => 'object'], // safety
             temperature: 0.4
         );
 
-        return isset($out['ideas']) && is_array($out['ideas']) ? $out['ideas'] : [];
+        $ideas = $this->normalizeIdeas($out);
+        if (!$ideas) {
+            Logger::info('generateIdeas returned empty after normalization', [
+                'lang' => $lang,
+                'seeds_sample' => array_slice($seeds, 0, 5),
+                'raw_keys' => array_keys((array)$out),
+            ]);
+        }
+        return $ideas;
     }
 
     private function responsesCall(string $model, array $inputBlocks, string $schemaName, array $schema, float $temperature): array
@@ -157,18 +158,17 @@ final class OpenAIService
             throw new \RuntimeException('OPENAI_API_KEY is not set.');
         }
 
+        // Use response_format (official path). Some clients reported `text.format` being ignored in edge cases.
         $payloadStructured = [
             'model' => $model,
             'input' => $inputBlocks,
             'temperature' => $temperature,
-            'text' => [
-                'format' => [
-                    'type' => 'json_schema',
-                    'json_schema' => [
-                        'name' => $schemaName,
-                        'schema' => $schema,
-                        'strict' => true
-                    ]
+            'response_format' => [
+                'type' => 'json_schema',
+                'json_schema' => [
+                    'name' => $schemaName,
+                    'schema' => $schema,
+                    'strict' => true
                 ]
             ]
         ];
@@ -188,8 +188,9 @@ final class OpenAIService
             Logger::error('OpenAI structured call failed', ['status' => $status, 'body' => $body]);
 
             if (in_array($status, [400, 422], true)) {
+                // Fallback to generic JSON object format
                 $payloadJsonMode = $payloadStructured;
-                $payloadJsonMode['text']['format'] = ['type' => 'json_object'];
+                $payloadJsonMode['response_format'] = ['type' => 'json_object'];
 
                 try {
                     $res2 = $this->http->post('responses', [
@@ -236,6 +237,7 @@ final class OpenAIService
             throw new \RuntimeException('OpenAI returned invalid JSON.');
         }
 
+        // Responses API commonly provides output_text. Keep a robust fallback.
         $jsonText = $data['output_text']
             ?? ($data['output'][0]['content'][0]['text'] ?? null);
 
@@ -245,9 +247,77 @@ final class OpenAIService
         }
 
         $out = json_decode($jsonText, true);
-        if (!is_array($out)) {
+        if (json_last_error() !== JSON_ERROR_NONE || !is_array($out)) {
             Logger::error('Structured output not JSON', ['text' => substr($jsonText, 0, 700)]);
             throw new \RuntimeException('Structured output not JSON.');
+        }
+        return $out;
+    }
+
+    /**
+     * Accepts either:
+     *  - { ideas: [ {...}, ... ] }
+     *  - [ {...}, ... ] (raw array)
+     *  - { items: [ {...} ] }  (belt & suspenders)
+     * Normalizes key styles (snake/camel).
+     */
+    private function normalizeIdeas(array $out): array
+    {
+        $candidate = [];
+
+        if (isset($out['ideas']) && is_array($out['ideas'])) {
+            $candidate = $out['ideas'];
+        } elseif (isset($out['items']) && is_array($out['items'])) {
+            $candidate = $out['items'];
+        } elseif (array_is_list($out)) {
+            $candidate = $out;
+        } else {
+            // Nothing we recognize
+            return [];
+        }
+
+        $norm = [];
+        foreach ($candidate as $i) {
+            if (!is_array($i)) continue;
+
+            $title = trim((string)($i['title'] ?? $i['idea'] ?? $i['headline'] ?? ''));
+            $pk    = trim((string)($i['primary_keyword'] ?? $i['primaryKeyword'] ?? $i['primary'] ?? $i['keyword'] ?? ''));
+            if ($pk === '' && $title !== '') $pk = $title;
+
+            // Normalize supporting_keywords to a clean string[].
+            $sk = $i['supporting_keywords'] ?? ($i['supportingKeywords'] ?? ($i['keywords'] ?? []));
+            if (is_string($sk)) {
+                $sk = array_values(array_filter(array_map('trim', explode(',', $sk))));
+            } elseif (!is_array($sk)) {
+                $sk = [];
+            } else {
+                $tmp = [];
+                foreach ($sk as $s) { $tmp[] = trim((string)$s); }
+                $sk = array_values(array_filter($tmp));
+            }
+
+            $angle  = trim((string)($i['angle'] ?? ($i['category'] ?? '')));
+            $intent = trim((string)($i['intent'] ?? 'informational'));
+
+            if ($title === '' || $pk === '') continue;
+
+            $norm[] = [
+                'title' => $title,
+                'primary_keyword' => $pk,
+                'supporting_keywords' => $sk,
+                'angle' => $angle,
+                'intent' => $intent,
+            ];
+        }
+
+        // Dedup locally by (title|primary_keyword) just in case
+        $seen = [];
+        $out  = [];
+        foreach ($norm as $n) {
+            $key = mb_strtolower(preg_replace('/\s+/', ' ', $n['title'])) . '|' . mb_strtolower($n['primary_keyword']);
+            if (isset($seen[$key])) continue;
+            $seen[$key] = 1;
+            $out[] = $n;
         }
         return $out;
     }

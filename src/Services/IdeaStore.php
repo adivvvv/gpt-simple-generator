@@ -31,21 +31,47 @@ final class IdeaStore
 
     public function addIdeas(array $newIdeas, int $cap = 2000): int
     {
-        $data = $this->load();
+        $data  = $this->load();
         $index = $data['index'] ?? [];
         $ideas = $data['ideas'] ?? [];
         $added = 0;
 
         foreach ($newIdeas as $i) {
             if (!is_array($i)) continue;
-            $title = trim((string)($i['title'] ?? ''));
-            $pk    = trim((string)($i['primary_keyword'] ?? ''));
+
+            // Accept both snake/camel and provide fallbacks
+            $title = trim((string)($i['title'] ?? $i['idea'] ?? $i['headline'] ?? ''));
+            $pk    = trim((string)($i['primary_keyword'] ?? $i['primaryKeyword'] ?? $i['primary'] ?? $i['keyword'] ?? ''));
+            if ($pk === '' && $title !== '') $pk = $title;
+
             if ($title === '' || $pk === '') continue;
+
+            // Normalize supporting keywords to string[]
+            if (isset($i['supportingKeywords']) && !isset($i['supporting_keywords'])) {
+                $i['supporting_keywords'] = $i['supportingKeywords'];
+            }
+            if (is_string($i['supporting_keywords'] ?? null)) {
+                $i['supporting_keywords'] = array_values(array_filter(array_map('trim', explode(',', (string)$i['supporting_keywords']))));
+            } elseif (!isset($i['supporting_keywords']) || !is_array($i['supporting_keywords'])) {
+                $i['supporting_keywords'] = [];
+            } else {
+                $tmp = [];
+                foreach ($i['supporting_keywords'] as $s) $tmp[] = trim((string)$s);
+                $i['supporting_keywords'] = array_values(array_filter($tmp));
+            }
 
             $key = mb_strtolower(preg_replace('/\s+/', ' ', $title)) . '|' . mb_strtolower($pk);
             if (isset($index[$key])) continue;
 
-            $ideas[] = $i;
+            // Rehydrate canonical fields
+            $ideas[] = [
+                'title' => $title,
+                'primary_keyword' => $pk,
+                'supporting_keywords' => $i['supporting_keywords'],
+                'angle' => (string)($i['angle'] ?? ($i['category'] ?? '')),
+                'intent' => (string)($i['intent'] ?? 'informational'),
+            ];
+
             $index[$key] = 1;
             $added++;
 

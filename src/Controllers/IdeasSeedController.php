@@ -6,8 +6,10 @@ namespace App\Controllers;
 
 use App\Support\Http;
 use App\Support\Validator;
+use App\Support\Logger;
 use App\Services\OpenAIService;
 use App\Services\IdeaStore;
+use Throwable;
 
 final class IdeasSeedController
 {
@@ -29,19 +31,31 @@ final class IdeasSeedController
         $addedTotal = 0;
         $guard = 0;
 
-        while ($store->count() < $target && $guard < 50) {
-            $ideas = $open->generateIdeas($lang, $seeds, $batch);
-            $added = $store->addIdeas($ideas, 2000);
-            $addedTotal += $added;
-            $guard++;
-            if ($added === 0) break; // nothing new; avoid infinite loops
+        try {
+            while ($store->count() < $target && $guard < 50) {
+                $ideas = $open->generateIdeas($lang, $seeds, $batch);
+                if (!is_array($ideas) || count($ideas) === 0) {
+                    Logger::info('No ideas returned this round', ['lang' => $lang, 'batch' => $batch]);
+                    $guard++;
+                    // small nudge: if nothing came back, halve the batch for the next loop
+                    $batch = max(10, (int)floor($batch / 2));
+                    continue;
+                }
+                $added = $store->addIdeas($ideas, 2000);
+                $addedTotal += $added;
+                $guard++;
+                if ($added === 0) break; // nothing new; avoid infinite loops
+            }
+        } catch (Throwable $e) {
+            Logger::error('ideas_seed failed', ['err' => $e->getMessage()]);
+            Http::json(['error' => 'Upstream generation failed'], 502);
         }
 
         Http::json([
-            'lang' => $lang,
+            'lang'   => $lang,
             'target' => $target,
-            'count' => $store->count(),
-            'added' => $addedTotal
+            'count'  => $store->count(),
+            'added'  => $addedTotal
         ], 200);
     }
 }
