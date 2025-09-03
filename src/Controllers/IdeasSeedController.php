@@ -7,6 +7,7 @@ namespace App\Controllers;
 use App\Support\Http;
 use App\Support\Validator;
 use App\Support\Logger;
+use App\Support\Env;
 use App\Services\OpenAIService;
 use App\Services\IdeaStore;
 use Throwable;
@@ -37,18 +38,18 @@ final class IdeasSeedController
                 if (!is_array($ideas) || count($ideas) === 0) {
                     Logger::info('No ideas returned this round', ['lang' => $lang, 'batch' => $batch]);
                     $guard++;
-                    // small nudge: if nothing came back, halve the batch for the next loop
                     $batch = max(10, (int)floor($batch / 2));
                     continue;
                 }
                 $added = $store->addIdeas($ideas, 2000);
                 $addedTotal += $added;
                 $guard++;
-                if ($added === 0) break; // nothing new; avoid infinite loops
+                if ($added === 0) break;
             }
         } catch (Throwable $e) {
             Logger::error('ideas_seed failed', ['err' => $e->getMessage()]);
-            Http::json(['error' => 'Upstream generation failed'], 502);
+            $dbg = Env::get('APP_DEBUG', 'false') === 'true';
+            Http::json($dbg ? ['error' => 'Upstream generation failed', 'details' => $e->getMessage()] : ['error' => 'Upstream generation failed'], 502);
         }
 
         Http::json([

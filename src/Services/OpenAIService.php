@@ -23,17 +23,15 @@ final class OpenAIService
         ]);
     }
 
-    /**
-     * Generate a full article as strict JSON per article.schema.json
-     */
+    /** Generate a full article as strict JSON per article.schema.json */
     public function generateArticle(array $payload, array $refs, array $schema): array
     {
-        $lang   = (string)$payload['lang'];
-        $lead   = (string)($payload['leadStyle'] ?? 'surprising-stat');
-        $minSp  = (int)($payload['minSentencesPerParagraph'] ?? 4);
-        $pmidMode = (string)($payload['pmidMode'] ?? 'limited'); // none|limited
+        $lang      = (string)$payload['lang'];
+        $lead      = (string)($payload['leadStyle'] ?? 'surprising-stat');
+        $minSp     = (int)($payload['minSentencesPerParagraph'] ?? 4);
+        $pmidMode  = (string)($payload['pmidMode'] ?? 'limited'); // none|limited
         $maxInline = (int)($payload['maxInlinePmids'] ?? 3);
-        $banPhrases = (array)($payload['banPhrases'] ?? []);
+        $banPhrases= (array)($payload['banPhrases'] ?? []);
 
         $allowedPmids = [];
         foreach ($refs as $r) {
@@ -79,22 +77,12 @@ final class OpenAIService
         ], JSON_UNESCAPED_UNICODE);
 
         $inputBlocks = [
-            [
-                'role' => 'system',
-                'content' => [
-                    ['type' => 'input_text', 'text' => $system]
-                ]
-            ],
-            [
-                'role' => 'user',
-                'content' => [
-                    ['type' => 'input_text', 'text' => "USER_PAYLOAD_JSON:\n" . $userJson]
-                ]
-            ]
+            ['role' => 'system', 'content' => [['type' => 'input_text', 'text' => $system]]],
+            ['role' => 'user',   'content' => [['type' => 'input_text', 'text' => "USER_PAYLOAD_JSON:\n".$userJson]]],
         ];
 
         return $this->responsesCall(
-            model: Env::get('OPENAI_MODEL_ARTICLE', 'gpt-5-mini'),
+            model: Env::get('OPENAI_MODEL_ARTICLE', 'o4-mini'),
             inputBlocks: $inputBlocks,
             schemaName: 'article_schema',
             schema: $schema,
@@ -107,9 +95,7 @@ final class OpenAIService
     {
         $schema = json_decode(file_get_contents(__DIR__ . '/../../schema/ideas.schema.json'), true);
 
-        // Lightweight instruction; schema enforces structure, but we’ll normalize anyway.
         $system = "Generate unique, high-intent SEO ideas in {$lang} about camel milk. Return JSON only; diverse angles; no duplicates.";
-
         $userJson = json_encode([
             'task' => 'seed_ideas',
             'language' => $lang,
@@ -118,25 +104,15 @@ final class OpenAIService
         ], JSON_UNESCAPED_UNICODE);
 
         $inputBlocks = [
-            [
-                'role' => 'system',
-                'content' => [
-                    ['type' => 'input_text', 'text' => $system]
-                ]
-            ],
-            [
-                'role' => 'user',
-                'content' => [
-                    ['type' => 'input_text', 'text' => "USER_PAYLOAD_JSON:\n" . $userJson]
-                ]
-            ]
+            ['role' => 'system', 'content' => [['type' => 'input_text', 'text' => $system]]],
+            ['role' => 'user',   'content' => [['type' => 'input_text', 'text' => "USER_PAYLOAD_JSON:\n".$userJson]]],
         ];
 
         $out = $this->responsesCall(
-            model: Env::get('OPENAI_MODEL_UTIL', Env::get('OPENAI_MODEL_ARTICLE', 'gpt-5-mini')),
+            model: Env::get('OPENAI_MODEL_UTIL', Env::get('OPENAI_MODEL_ARTICLE', 'o4-mini')),
             inputBlocks: $inputBlocks,
             schemaName: 'ideas_schema',
-            schema: $schema ?: ['type' => 'object'], // safety
+            schema: $schema ?: ['type' => 'object'],
             temperature: 0.4
         );
 
@@ -154,16 +130,14 @@ final class OpenAIService
     private function responsesCall(string $model, array $inputBlocks, string $schemaName, array $schema, float $temperature): array
     {
         $apiKey = Env::get('OPENAI_API_KEY', '');
-        if ($apiKey === '') {
-            throw new \RuntimeException('OPENAI_API_KEY is not set.');
-        }
+        if ($apiKey === '') throw new \RuntimeException('OPENAI_API_KEY is not set.');
 
-        // Use response_format (official path). Some clients reported `text.format` being ignored in edge cases.
+        // Primary: Structured Outputs
         $payloadStructured = [
             'model' => $model,
             'input' => $inputBlocks,
             'temperature' => $temperature,
-            'response_format' => [
+            'response_format' => [ // official parameter for structured outputs
                 'type' => 'json_schema',
                 'json_schema' => [
                     'name' => $schemaName,
@@ -176,105 +150,102 @@ final class OpenAIService
         try {
             $res = $this->http->post('responses', [
                 'headers' => [
-                    'Authorization' => 'Bearer ' . $apiKey,
+                    'Authorization' => 'Bearer '.$apiKey,
                     'Content-Type'  => 'application/json',
                 ],
                 'json' => $payloadStructured
             ]);
-            return $this->extractJson($res);
-        } catch (RequestException $e) {
-            $status = $e->getResponse()?->getStatusCode() ?? 0;
-            $body   = $e->hasResponse() ? (string)$e->getResponse()->getBody() : '';
-            Logger::error('OpenAI structured call failed', ['status' => $status, 'body' => $body]);
-
-            if (in_array($status, [400, 422], true)) {
-                // Fallback to generic JSON object format
+            // Some models intermittently return empty output_text; decode more robustly:
+            try {
+                return $this->extractJson($res);
+            } catch (\Throwable $decodeFail) {
+                Logger::info('Primary decode failed; retrying with json_object', ['err' => $decodeFail->getMessage()]);
+                // Fallback A: ask again with json_object
                 $payloadJsonMode = $payloadStructured;
                 $payloadJsonMode['response_format'] = ['type' => 'json_object'];
 
+                $res2 = $this->http->post('responses', [
+                    'headers' => [
+                        'Authorization' => 'Bearer '.$apiKey,
+                        'Content-Type'  => 'application/json',
+                    ],
+                    'json' => $payloadJsonMode
+                ]);
                 try {
-                    $res2 = $this->http->post('responses', [
-                        'headers' => [
-                            'Authorization' => 'Bearer ' . $apiKey,
-                            'Content-Type'  => 'application/json',
-                        ],
-                        'json' => $payloadJsonMode
-                    ]);
                     return $this->extractJson($res2);
-                } catch (RequestException $e2) {
-                    Logger::error('OpenAI json_object call failed', [
-                        'status' => $e2->getResponse()?->getStatusCode(),
-                        'body'   => $e2->hasResponse() ? (string)$e2->getResponse()->getBody() : ''
-                    ]);
-
-                    $fallback = Env::get('OPENAI_MODEL_FALLBACK', 'gpt-4o-mini');
+                } catch (\Throwable $decodeFail2) {
+                    Logger::info('json_object decode failed; retrying with fallback model', ['err' => $decodeFail2->getMessage()]);
+                    // Fallback B: switch model (e.g., o4-mini) if different
+                    $fallback = Env::get('OPENAI_MODEL_FALLBACK', 'o4-mini');
                     if ($fallback && $fallback !== $model) {
                         $payloadJsonMode['model'] = $fallback;
                         $res3 = $this->http->post('responses', [
                             'headers' => [
-                                'Authorization' => 'Bearer ' . $apiKey,
+                                'Authorization' => 'Bearer '.$apiKey,
                                 'Content-Type'  => 'application/json',
                             ],
                             'json' => $payloadJsonMode
                         ]);
                         return $this->extractJson($res3);
                     }
+                    throw $decodeFail2;
                 }
             }
-
-            $msg = 'OpenAI request failed: ' . $status;
-            if (Env::get('APP_DEBUG', 'false') === 'true' && $body) {
-                $msg .= ' — ' . mb_strimwidth(preg_replace('/\s+/', ' ', $body), 0, 900, '…');
-            }
-            throw new \RuntimeException($msg);
+        } catch (RequestException $e) {
+            $status = $e->getResponse()?->getStatusCode() ?? 0;
+            $body   = $e->hasResponse() ? (string)$e->getResponse()->getBody() : '';
+            Logger::error('OpenAI structured call failed', ['status' => $status, 'body' => $body]);
+            throw new \RuntimeException('OpenAI request failed: '.$status);
         }
     }
 
     private function extractJson(ResponseInterface $res): array
     {
         $data = json_decode((string)$res->getBody(), true);
-        if (!is_array($data)) {
-            throw new \RuntimeException('OpenAI returned invalid JSON.');
+        if (!is_array($data)) throw new \RuntimeException('OpenAI returned invalid JSON.');
+
+        // 1) Preferred: output_text
+        $jsonText = $data['output_text'] ?? null;
+
+        // 2) Robust harvest from outputs array if empty
+        if (!is_string($jsonText) || trim($jsonText) === '') {
+            $harvest = [];
+            if (isset($data['output']) && is_array($data['output'])) {
+                foreach ($data['output'] as $o) {
+                    $content = $o['content'] ?? null;
+                    if (!is_array($content)) continue;
+                    foreach ($content as $c) {
+                        // common shapes: ['type'=>'output_text','text'=>'...'] or ['type'=>'text','text'=>'...']
+                        if (isset($c['text']) && is_string($c['text']) && trim($c['text']) !== '') {
+                            $harvest[] = $c['text'];
+                        }
+                    }
+                }
+            }
+            $jsonText = trim(implode("\n", $harvest));
         }
 
-        // Responses API commonly provides output_text. Keep a robust fallback.
-        $jsonText = $data['output_text']
-            ?? ($data['output'][0]['content'][0]['text'] ?? null);
-
         if (!is_string($jsonText) || $jsonText === '') {
-            Logger::error('OpenAI unexpected shape', ['sample' => substr(json_encode($data), 0, 1000)]);
+            Logger::error('OpenAI response missing text; sample', ['sample' => substr(json_encode($data), 0, 1000)]);
             throw new \RuntimeException('OpenAI response missing text.');
         }
 
         $out = json_decode($jsonText, true);
-        if (json_last_error() !== JSON_ERROR_NONE || !is_array($out)) {
+        if (!is_array($out)) {
             Logger::error('Structured output not JSON', ['text' => substr($jsonText, 0, 700)]);
             throw new \RuntimeException('Structured output not JSON.');
         }
         return $out;
     }
 
-    /**
-     * Accepts either:
-     *  - { ideas: [ {...}, ... ] }
-     *  - [ {...}, ... ] (raw array)
-     *  - { items: [ {...} ] }  (belt & suspenders)
-     * Normalizes key styles (snake/camel).
-     */
+    /** Accepts {ideas:[...]}, [ ... ], or {items:[...]} and normalizes key styles */
     private function normalizeIdeas(array $out): array
     {
         $candidate = [];
-
-        if (isset($out['ideas']) && is_array($out['ideas'])) {
-            $candidate = $out['ideas'];
-        } elseif (isset($out['items']) && is_array($out['items'])) {
-            $candidate = $out['items'];
-        } elseif (array_is_list($out)) {
-            $candidate = $out;
-        } else {
-            // Nothing we recognize
-            return [];
-        }
+        if (isset($out['ideas']) && is_array($out['ideas']))       $candidate = $out['ideas'];
+        elseif (isset($out['items']) && is_array($out['items']))   $candidate = $out['items'];
+        elseif (array_is_list($out))                               $candidate = $out;
+        else return [];
 
         $norm = [];
         foreach ($candidate as $i) {
@@ -283,8 +254,8 @@ final class OpenAIService
             $title = trim((string)($i['title'] ?? $i['idea'] ?? $i['headline'] ?? ''));
             $pk    = trim((string)($i['primary_keyword'] ?? $i['primaryKeyword'] ?? $i['primary'] ?? $i['keyword'] ?? ''));
             if ($pk === '' && $title !== '') $pk = $title;
+            if ($title === '' || $pk === '') continue;
 
-            // Normalize supporting_keywords to a clean string[].
             $sk = $i['supporting_keywords'] ?? ($i['supportingKeywords'] ?? ($i['keywords'] ?? []));
             if (is_string($sk)) {
                 $sk = array_values(array_filter(array_map('trim', explode(',', $sk))));
@@ -292,14 +263,12 @@ final class OpenAIService
                 $sk = [];
             } else {
                 $tmp = [];
-                foreach ($sk as $s) { $tmp[] = trim((string)$s); }
+                foreach ($sk as $s) $tmp[] = trim((string)$s);
                 $sk = array_values(array_filter($tmp));
             }
 
             $angle  = trim((string)($i['angle'] ?? ($i['category'] ?? '')));
             $intent = trim((string)($i['intent'] ?? 'informational'));
-
-            if ($title === '' || $pk === '') continue;
 
             $norm[] = [
                 'title' => $title,
@@ -310,9 +279,8 @@ final class OpenAIService
             ];
         }
 
-        // Dedup locally by (title|primary_keyword) just in case
         $seen = [];
-        $out  = [];
+        $out = [];
         foreach ($norm as $n) {
             $key = mb_strtolower(preg_replace('/\s+/', ' ', $n['title'])) . '|' . mb_strtolower($n['primary_keyword']);
             if (isset($seen[$key])) continue;
