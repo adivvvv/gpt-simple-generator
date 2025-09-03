@@ -46,6 +46,11 @@ try {
     } elseif ($method === 'POST' && $path === '/seed_keywords') {
         Http::requireJson();
         (new SeedKeywordsController())->handle();
+    } elseif ($method === 'POST' && $path === '/ideas_seed') {
+        App\Support\Http::requireJson();
+        (new \App\Controllers\IdeasSeedController())->handle();
+    } elseif ($method === 'GET' && $path === '/ideas') {
+        (new \App\Controllers\IdeasListController())->handle();
     } else {
         Http::json(['error' => 'Not found'], 404);
     }

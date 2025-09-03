@@ -22,18 +22,68 @@ final class OpenAIService
         ]);
     }
 
-    /** Generate a full article as strict JSON per article.schema.json */
+    /**
+     * Generate a full article as strict JSON per article.schema.json
+     * Extra controls:
+     *  - leadStyle: string (e.g., "myth-busting", "surprising-stat", "question", "historical-note", "case-context", "analogy")
+     *  - minSentencesPerParagraph: int
+     *  - pmidMode: "none"|"limited"
+     *  - maxInlinePmids: int (used when pmidMode = "limited")
+     *  - banPhrases: string[] (phrases to avoid anywhere, esp. in the intro)
+     */
     public function generateArticle(array $payload, array $refs, array $schema): array
     {
-        $system = "You are CamelWay scientific editor. Write an original, human-sounding article in {$payload['lang']} about camel milk, text-only. Cite PubMed PMIDs inline like [PMID:12345678]. Summarize evidence; no medical advice; EU style compliance. Target {$payload['paragraphs']} paragraphs; include {$payload['faqCount']} FAQs.";
+        $lang   = (string)$payload['lang'];
+        $lead   = (string)($payload['leadStyle'] ?? 'surprising-stat');
+        $minSp  = (int)($payload['minSentencesPerParagraph'] ?? 4);
+        $pmidMode = (string)($payload['pmidMode'] ?? 'limited'); // none|limited
+        $maxInline = (int)($payload['maxInlinePmids'] ?? 3);
+        $banPhrases = (array)($payload['banPhrases'] ?? []);
+
+        $allowedPmids = [];
+        foreach ($refs as $r) {
+            $p = (string)($r['pmid'] ?? '');
+            if ($p !== '') $allowedPmids[] = $p;
+        }
+        $allowedPmids = array_values(array_unique($allowedPmids));
+
+        $banListText = $banPhrases ? ("Avoid these phrases verbatim or near-duplicate paraphrases: • " . implode(" • ", $banPhrases) . ".") : '';
+        $pmidPolicyText = $pmidMode === 'none'
+            ? "Inline citations policy: include ZERO inline PMIDs anywhere in the body or FAQ."
+            : "Inline citations policy: include AT MOST {$maxInline} total inline PMIDs in the entire article (not per paragraph). Never repeat the same PMID, do not add PMIDs in FAQ. Use only from this allowed set: [" . implode(',', $allowedPmids) . "].";
+
+        $system = implode("\n", [
+            "You are a careful scientific editor writing in {$lang}.",
+            "Goals:",
+            "- Start with a UNIQUE, non-generic introduction using the lead style: {$lead}. Do NOT reuse boilerplate.",
+            "- Use a varied opening device (e.g., a pointed question, surprising data, myth-busting, short historical note, practical scenario, or crisp analogy).",
+            "- Structure: target {$payload['paragraphs']} paragraphs; EACH paragraph must have at least {$minSp} sentences (full-stops, not fragments).",
+            "- Summarize evidence and mechanisms clearly and neutrally; no medical advice; EU-compliant tone.",
+            "- FAQs: include {$payload['faqCount']} questions/answers (plain text).",
+            "- Citations: {$pmidPolicyText}",
+            "- Never fabricate PMIDs or study data. If uncertain, omit the inline citation.",
+            $banListText,
+            "Constraints:",
+            "- Text-only. No images, no tables.",
+            "- Use consistent terminology in {$lang}.",
+            "- If you include PMIDs inline, cite like [PMID:12345678].",
+        ]);
 
         $userJson = json_encode([
             'task' => 'write_article',
-            'language' => $payload['lang'],
+            'language' => $lang,
             'keywords' => $payload['keywords'],
             'styleFlags' => $payload['styleFlags'],
             'specialRequirements' => $payload['specialRequirements'] ?? '',
             'references' => $refs,
+            'controls' => [
+                'leadStyle' => $lead,
+                'minSentencesPerParagraph' => $minSp,
+                'pmidMode' => $pmidMode,
+                'maxInlinePmids' => $maxInline,
+                'allowedPmids' => $allowedPmids,
+                'banPhrases' => $banPhrases
+            ]
         ], JSON_UNESCAPED_UNICODE);
 
         $inputBlocks = [
@@ -56,11 +106,11 @@ final class OpenAIService
             inputBlocks: $inputBlocks,
             schemaName: 'article_schema',
             schema: $schema,
-            temperature: 0.3
+            temperature: (float)($payload['temperature'] ?? 0.45) // a bit higher for intro diversity
         );
     }
 
-    /** Generate keyword ideas as strict JSON per ideas.schema.json */
+    /** Generate keyword ideas as strict JSON per ideas.schema.json (unchanged) */
     public function generateIdeas(string $lang, array $seeds, int $count): array
     {
         $schema = json_decode(file_get_contents(__DIR__ . '/../../schema/ideas.schema.json'), true);
@@ -100,12 +150,6 @@ final class OpenAIService
         return isset($out['ideas']) && is_array($out['ideas']) ? $out['ideas'] : [];
     }
 
-    /**
-     * Core Responses call (new API shape):
-     *  - Use text.format for Structured Outputs (json_schema)
-     *  - On 400/422, retry with JSON mode (text.format.type = json_object)
-     *  - Final fallback: alternate model if configured
-     */
     private function responsesCall(string $model, array $inputBlocks, string $schemaName, array $schema, float $temperature): array
     {
         $apiKey = Env::get('OPENAI_API_KEY', '');
@@ -143,7 +187,6 @@ final class OpenAIService
             $body   = $e->hasResponse() ? (string)$e->getResponse()->getBody() : '';
             Logger::error('OpenAI structured call failed', ['status' => $status, 'body' => $body]);
 
-            // Retry with JSON mode if schema/format rejected
             if (in_array($status, [400, 422], true)) {
                 $payloadJsonMode = $payloadStructured;
                 $payloadJsonMode['text']['format'] = ['type' => 'json_object'];
@@ -163,7 +206,6 @@ final class OpenAIService
                         'body'   => $e2->hasResponse() ? (string)$e2->getResponse()->getBody() : ''
                     ]);
 
-                    // Final fallback: swap model if configured
                     $fallback = Env::get('OPENAI_MODEL_FALLBACK', 'gpt-4o-mini');
                     if ($fallback && $fallback !== $model) {
                         $payloadJsonMode['model'] = $fallback;
@@ -187,7 +229,6 @@ final class OpenAIService
         }
     }
 
-    /** Extract JSON from Responses API (supports output_text and nested content). */
     private function extractJson(ResponseInterface $res): array
     {
         $data = json_decode((string)$res->getBody(), true);
@@ -195,7 +236,6 @@ final class OpenAIService
             throw new \RuntimeException('OpenAI returned invalid JSON.');
         }
 
-        // Prefer output_text when present
         $jsonText = $data['output_text']
             ?? ($data['output'][0]['content'][0]['text'] ?? null);
 
