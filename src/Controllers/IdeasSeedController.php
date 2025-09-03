@@ -44,7 +44,7 @@ final class IdeasSeedController
                 $added = $store->addIdeas($ideas, 2000);
                 $addedTotal += $added;
                 $guard++;
-                if ($added === 0) break;
+                if ($added === 0) break; // all duplicates reached cap
             }
         } catch (Throwable $e) {
             Logger::error('ideas_seed failed', ['err' => $e->getMessage()]);
