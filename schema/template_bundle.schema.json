@@ -1,0 +1,22 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "seed", "files"],
+  "properties": {
+    "name":  { "type": "string" },
+    "seed":  { "type": "string" },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path","content"],
+        "properties": {
+          "path":    { "type": "string" },
+          "content": { "type": "string" }
+        }
+      }
+    },
+    "notes": { "type": "array", "items": { "type": "string" } }
+  }
+}

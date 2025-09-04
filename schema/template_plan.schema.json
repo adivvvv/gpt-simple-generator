@@ -1,0 +1,60 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["seed", "name", "prefix", "palette", "type_scale", "layout", "copy"],
+  "properties": {
+    "seed":   { "type": "string", "description": "opaque seed used to steer uniqueness" },
+    "name":   { "type": "string", "description": "human name for the theme" },
+    "prefix": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,14}$", "description": "class prefix, e.g., cw-a7" },
+
+    "palette": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bg","card","fg","muted","accent","accent_ink","border"],
+      "properties": {
+        "bg":         { "type": "string" },
+        "card":       { "type": "string" },
+        "fg":         { "type": "string" },
+        "muted":      { "type": "string" },
+        "accent":     { "type": "string" },
+        "accent_ink": { "type": "string" },
+        "border":     { "type": "string" }
+      }
+    },
+
+    "type_scale": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["base_px","leading","measure_ch"],
+      "properties": {
+        "base_px":    { "type": "integer", "minimum": 15, "maximum": 19 },
+        "leading":    { "type": "number", "minimum": 1.45, "maximum": 1.8 },
+        "measure_ch": { "type": "integer", "minimum": 58, "maximum": 76 }
+      }
+    },
+
+    "layout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["header_variant","hero_variant","card_variant","pagination_variant","icons"],
+      "properties": {
+        "header_variant":     { "enum": ["rail","stacked","double"] },
+        "hero_variant":       { "enum": ["center-thin","left-stacked","boxed"] },
+        "card_variant":       { "enum": ["soft","outlined","lined"] },
+        "pagination_variant": { "enum": ["minimal","pill","boxed"] },
+        "icons":              { "enum": ["svg","unicode"] }
+      }
+    },
+
+    "copy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hero_title","hero_subtitle","cta_label"],
+      "properties": {
+        "hero_title":    { "type": "string" },
+        "hero_subtitle": { "type": "string" },
+        "cta_label":     { "type": "string" }
+      }
+    }
+  }
+}

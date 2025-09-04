@@ -187,6 +187,59 @@ final class OpenAIService
         }
     }
 
+    /**
+     * Generate a template plan.
+     */
+    public function generateTemplatePlan(string $lang, string $seed, array $styleFlags): array
+    {
+        $schema = json_decode(file_get_contents(__DIR__ . '/../../schema/template_plan.schema.json'), true);
+        if (!is_array($schema)) {
+            throw new \RuntimeException('template_plan.schema.json missing');
+        }
+
+        $system = implode("\n", [
+            "You are a senior web theme designer.",
+            "Goal: Propose a small design system for a text-only, image-free, cookie-free, Tailwind-like site.",
+            "Constraints:",
+            "- No external assets, no remote fonts, no scripts.",
+            "- Prioritize readability: ~60–70 characters per line, generous line-height.",
+            "- Palette must be accessible; avoid low-contrast pairings (aim for WCAG AA).",
+            "- Header must include a 'Latest 10' rail variant when header_variant='rail'.",
+            "- Provide short copy for hero title/subtitle (language: {$lang}).",
+            "",
+            "Return ONLY JSON per schema; no explanations."
+        ]);
+
+        $user = [
+            'task'       => 'template_plan',
+            'language'   => $lang,
+            'seed'       => $seed,
+            'styleFlags' => $styleFlags
+        ];
+
+        $inputBlocks = [
+            ['role'=>'system','content'=>[['type'=>'input_text','text'=>$system]]],
+            ['role'=>'user','content'=>[['type'=>'input_text','text'=>"USER_PAYLOAD_JSON:\n".json_encode($user, JSON_UNESCAPED_UNICODE)]]],
+        ];
+
+        $out = $this->responsesCall(
+            model: Env::get('OPENAI_MODEL_UTIL', Env::get('OPENAI_MODEL_ARTICLE', 'gpt-5-mini')),
+            inputBlocks: $inputBlocks,
+            schemaName: 'template_plan',
+            schema: $schema,
+            temperature: 0.55 // allow creative variety
+        );
+
+        // Fairly strict: ensure minimal keys exist
+        foreach (['seed','name','prefix','palette','type_scale','layout','copy'] as $k) {
+            if (!isset($out[$k])) {
+                Logger::error('template plan missing key', ['key'=>$k,'out'=>$out]);
+                throw new \RuntimeException('Template plan missing key: '.$k);
+            }
+        }
+        return $out;
+    }
+
     private function responsesCall(string $model, array $inputBlocks, string $schemaName, array $schema, float $temperature): array
     {
         $apiKey = Env::get('OPENAI_API_KEY', '');
