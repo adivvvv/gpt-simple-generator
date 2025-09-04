@@ -295,8 +295,8 @@ PHP;
     }
 
     private function homePhp(string $pre, string $lang, array $copy, array $l): string
-    {
-        return <<<PHP
+  {
+    return <<<PHP
 <?php require __DIR__.'/partial-icons.php'; require __DIR__.'/partial-header.php';
 /** Pagination + posts */
 \$perPage = (int)(\$config['posts_per_page'] ?? 20);
@@ -314,7 +314,8 @@ if (is_file(\$idxFile)) {
 }
 \$totalPages = max(1, (int)ceil(\$total / \$perPage));
 
-function {$pre}_pagelink(int \$p): string { \$p=max(1,\$p); return '?page='.\$p.'#recent'; }
+/** Build a page link (kept local & safe; avoids dynamic function names) */
+\$pagelink = fn (int \$p): string => '?page=' . max(1, \$p) . '#recent';
 ?>
 <!doctype html>
 <html lang="<?=htmlspecialchars(\$config['lang'] ?? '$lang')?>">
@@ -371,7 +372,7 @@ function {$pre}_pagelink(int \$p): string { \$p=max(1,\$p); return '?page='.\$p.
       <!-- Pagination -->
       <?php if (\$totalPages > 1): ?>
       <nav class="$pre-pagination" role="navigation" aria-label="Pagination">
-        <a class="{$pre}-page-link<?=\$page<=1?' '.$pre.'-page-disabled':''?>" href="<?=\$page<=1?'#':{$pre}_pagelink(\$page-1)?>">Previous</a>
+        <a class="{$pre}-page-link<?=\$page<=1?' '.$pre.'-page-disabled':''?>" href="<?=\$page<=1?'#':\$pagelink(\$page-1)?>">Previous</a>
         <?php
           \$window = 2;
           \$start = max(1, \$page - \$window);
@@ -379,11 +380,11 @@ function {$pre}_pagelink(int \$p): string { \$p=max(1,\$p); return '?page='.\$p.
           if (\$start > 1) echo '<span class="'.$pre.'-page-ellipsis">…</span>';
           for (\$i=\$start; \$i<=\$end; \$i++) {
             \$cls = '$pre-page-link'.(\$i===\$page?' '.$pre.'-page-active':'');
-            echo '<a class="'.\$cls.'" href="'.{$pre}_pagelink(\$i).'">'.\$i.'</a>';
+            echo '<a class="'.\$cls.'" href="'.\$pagelink(\$i).'">'.\$i.'</a>';
           }
           if (\$end < \$totalPages) echo '<span class="'.$pre.'-page-ellipsis">…</span>';
         ?>
-        <a class="{$pre}-page-link<?=\$page>=\$totalPages?' '.$pre.'-page-disabled':''?>" href="<?=\$page>=\$totalPages?'#':{$pre}_pagelink(\$page+1)?>">Next</a>
+        <a class="{$pre}-page-link<?=\$page>=\$totalPages?' '.$pre.'-page-disabled':''?>" href="<?=\$page>=\$totalPages?'#':\$pagelink(\$page+1)?>">Next</a>
       </nav>
       <?php endif; ?>
     </section>
@@ -392,7 +393,8 @@ function {$pre}_pagelink(int \$p): string { \$p=max(1,\$p); return '?page='.\$p.
 </body>
 </html>
 PHP;
-    }
+}
+
 
     private function articlePhp(string $pre, string $lang): string
     {
