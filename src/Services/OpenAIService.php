@@ -197,16 +197,21 @@ final class OpenAIService
             throw new \RuntimeException('template_plan.schema.json missing');
         }
 
+        // Stronger instruction: explicitly list required keys
         $system = implode("\n", [
             "You are a senior web theme designer.",
             "Goal: Propose a small design system for a text-only, image-free, cookie-free, Tailwind-like site.",
-            "Constraints:",
-            "- No external assets, no remote fonts, no scripts.",
-            "- Prioritize readability: ~60–70 characters per line, generous line-height.",
-            "- Palette must be accessible; avoid low-contrast pairings (aim for WCAG AA).",
-            "- Header must include a 'Latest 10' rail variant when header_variant='rail'.",
-            "- Provide short copy for hero title/subtitle (language: {$lang}).",
-            "",
+            "MUST OUTPUT JSON with EXACT keys: seed, name, prefix, palette, type_scale, layout, copy.",
+            "Rules:",
+            "- Copy seed from user payload.",
+            "- name: short human-friendly theme name (2–3 words, Title Case).",
+            "- prefix: lowercase CSS class prefix (<=15 chars), pattern ^[a-z][a-z0-9-]{1,14}$ (e.g., cw-a7).",
+            "- palette: bg, card, fg, muted, accent, accent_ink, border (accessible contrast, WCAG AA).",
+            "- type_scale: base_px(15..19), leading(1.45..1.8), measure_ch(58..76).",
+            "- layout: header_variant(rail|stacked|double), hero_variant(center-thin|left-stacked|boxed),",
+            "          card_variant(soft|outlined|lined), pagination_variant(minimal|pill|boxed), icons(svg|unicode).",
+            "- copy: hero_title, hero_subtitle, cta_label (language: {$lang}).",
+            "- No external assets or remote fonts. No JS. Text-only.",
             "Return ONLY JSON per schema; no explanations."
         ]);
 
@@ -230,14 +235,21 @@ final class OpenAIService
             temperature: 0.55
         );
 
-        // Ensure 'seed' echoes input; ensure 'prefix' validity as fallback
+        // Harden required fields
+        // 1) seed must echo input
         $out['seed'] = $out['seed'] ?? $seed;
+
+        // 2) prefix fallback (valid + deterministic)
         if (empty($out['prefix']) || !preg_match('/^[a-z][a-z0-9-]{1,14}$/', (string)$out['prefix'])) {
-            // Deterministic prefix from seed; fits schema pattern and <=15 chars
             $out['prefix'] = 'cw-' . substr(preg_replace('/[^a-z0-9]/', '', strtolower(hash('sha1', $seed))), 0, 10);
         }
 
-        // Strict check (will now pass unless model radically deviates)
+        // 3) name fallback (deterministic, readable)
+        if (empty($out['name'])) {
+            $out['name'] = $this->themeNameFromSeed($seed, $styleFlags, $lang);
+        }
+
+        // Final strict check (will now pass)
         foreach (['seed','name','prefix','palette','type_scale','layout','copy'] as $k) {
             if (!isset($out[$k])) {
                 \App\Support\Logger::error('template plan missing key', ['key'=>$k,'out'=>$out]);
@@ -245,6 +257,36 @@ final class OpenAIService
             }
         }
         return $out;
+    }
+
+    /**
+     * Deterministic, short theme name from seed + flags.
+     * Example outputs: "Desert Olive", "Saffron Rail", "Quartz Serif".
+     */
+    private function themeNameFromSeed(string $seed, array $styleFlags, string $lang = 'en'): string
+    {
+        // NB: language-sensitive naming can be added later; keep EN now.
+        $adjectives = [
+            'Desert','Olive','Saffron','Quartz','Azure','Ivory','Cedar','Marble','Amber','Linen',
+            'Slate','Moss','Drift','Velvet','Amberlite','Nimbus','Cinder','Aster','Wheat','Sienna'
+        ];
+        $nouns = [
+            'Breeze','Rail','Serif','Canvas','Page','Note','Read','Column','Verse','Glyph',
+            'Frame','Fold','Scroll','Ledger','Quill','Outline','Accent','Stream','Cluster','Atlas'
+        ];
+        // Pick indexes from seed hash
+        $h = hexdec(substr(hash('sha1', $seed), 0, 8));
+        $a = $adjectives[$h % count($adjectives)];
+        $b = $nouns[($h >> 5) % count($nouns)];
+
+        // Nudge for flags
+        $flagNudge = '';
+        $flags = array_map('strtolower', $styleFlags);
+        if (in_array('serifish', $flags, true) && !in_array($b, ['Serif','Ledger','Quill'], true)) $b = 'Serif';
+        if (in_array('boxed', $flags, true)   && !in_array($b, ['Frame','Canvas','Ledger'], true)) $flagNudge = ' Frame';
+        if (in_array('airy', $flags, true)    && !in_array($a, ['Breeze','Nimbus'], true))         $a = 'Breeze';
+
+        return trim("$a $b$flagNudge");
     }
 
     private function responsesCall(string $model, array $inputBlocks, string $schemaName, array $schema, float $temperature): array
