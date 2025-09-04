@@ -227,13 +227,20 @@ final class OpenAIService
             inputBlocks: $inputBlocks,
             schemaName: 'template_plan',
             schema: $schema,
-            temperature: 0.55 // allow creative variety
+            temperature: 0.55
         );
 
-        // Fairly strict: ensure minimal keys exist
+        // Ensure 'seed' echoes input; ensure 'prefix' validity as fallback
+        $out['seed'] = $out['seed'] ?? $seed;
+        if (empty($out['prefix']) || !preg_match('/^[a-z][a-z0-9-]{1,14}$/', (string)$out['prefix'])) {
+            // Deterministic prefix from seed; fits schema pattern and <=15 chars
+            $out['prefix'] = 'cw-' . substr(preg_replace('/[^a-z0-9]/', '', strtolower(hash('sha1', $seed))), 0, 10);
+        }
+
+        // Strict check (will now pass unless model radically deviates)
         foreach (['seed','name','prefix','palette','type_scale','layout','copy'] as $k) {
             if (!isset($out[$k])) {
-                Logger::error('template plan missing key', ['key'=>$k,'out'=>$out]);
+                \App\Support\Logger::error('template plan missing key', ['key'=>$k,'out'=>$out]);
                 throw new \RuntimeException('Template plan missing key: '.$k);
             }
         }
@@ -326,19 +333,30 @@ final class OpenAIService
             throw new \RuntimeException('OpenAI returned invalid JSON.');
         }
 
-        // Preferred path
-        $candidate = $data['output_text'] ?? null;
-        if (is_string($candidate) && $candidate !== '') {
-            $try = json_decode($candidate, true);
+        // 1) Preferred: responses content blocks with type=output_json
+        if (isset($data['output']) && is_array($data['output'])) {
+            foreach ($data['output'] as $o) {
+                if (!isset($o['content']) || !is_array($o['content'])) continue;
+                foreach ($o['content'] as $c) {
+                    // Modern structured path
+                    if (($c['type'] ?? '') === 'output_json' && isset($c['json']) && is_array($c['json'])) {
+                        return $c['json'];
+                    }
+                }
+            }
+        }
+
+        // 2) Next best: top-level output_text
+        if (isset($data['output_text']) && is_string($data['output_text']) && trim($data['output_text']) !== '') {
+            $try = json_decode($data['output_text'], true);
             if (is_array($try)) return $try;
         }
 
-        // Robust path: scan content blocks and pick the FIRST valid JSON block.
+        // 3) Fallback: scan any content[text] blocks for a JSON object
         if (isset($data['output']) && is_array($data['output'])) {
             foreach ($data['output'] as $o) {
-                $content = $o['content'] ?? null;
-                if (!is_array($content)) continue;
-                foreach ($content as $c) {
+                if (!isset($o['content']) || !is_array($o['content'])) continue;
+                foreach ($o['content'] as $c) {
                     $txt = $c['text'] ?? null;
                     if (!is_string($txt) || trim($txt) === '') continue;
                     $decoded = json_decode($txt, true);
@@ -349,8 +367,9 @@ final class OpenAIService
             }
         }
 
-        // Nothing parseable:
-        Logger::error('OpenAI unexpected shape', ['sample' => substr(json_encode($data), 0, 1000)]);
+        // Nothing parseable
+        \App\Support\Logger::error('OpenAI unexpected shape', ['sample' => substr(json_encode($data), 0, 1000)]);
         throw new \RuntimeException('OpenAI response missing valid JSON.');
     }
+
 }
