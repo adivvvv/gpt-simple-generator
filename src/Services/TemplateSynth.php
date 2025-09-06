@@ -91,7 +91,7 @@ PHP;
 
     private function cssFromPlan(string $pre, array $p, array $t, array $l): string
     {
-        // Compute accessible hover color (darker accent), keep text ink for text only.
+        // Compute accessible hover color (slightly darker accent).
         $accentHover = $this->darkenHex($p['accent'], 0.85);
 
         $card = [
@@ -303,10 +303,6 @@ PHP;
 
     private function homePhp(string $pre, string $lang, array $copy, array $l): string
     {
-        // We add cache-busting to CSS <link> using filemtime (standard, widely used). :contentReference[oaicite:2]{index=2}
-        $cssPathPHP = "__DIR__ . '/../../public/assets/tailwind.css'";
-        $ell = '<span class="'.$pre.'-page-ellipsis">…</span>';
-
         return <<<PHP
 <?php require __DIR__.'/partial-icons.php'; require __DIR__.'/partial-header.php';
 /** Pagination + posts */
@@ -325,11 +321,11 @@ if (is_file(\$idxFile)) {
 }
 \$totalPages = max(1, (int)ceil(\$total / \$perPage));
 
-/** Build a page link (kept local & safe) */
+/** Build a page link */
 \$pagelink = fn (int \$p): string => '?page=' . max(1, \$p) . '#recent';
 \$rssHref  = (\$config['base_url'] ?? '').'/rss.xml';
 \$atomHref = (\$config['base_url'] ?? '').'/atom.xml';
-\$cssver   = @filemtime($cssPathPHP) ?: time();
+\$cssver   = @filemtime(__DIR__ . '/../../public/assets/tailwind.css') ?: time();
 ?>
 <!doctype html>
 <html lang="<?=htmlspecialchars(\$config['lang'] ?? '$lang')?>">
@@ -388,21 +384,23 @@ if (is_file(\$idxFile)) {
       <!-- Pagination -->
       <?php if (\$totalPages > 1): ?>
       <nav class="$pre-pagination" role="navigation" aria-label="Pagination">
-        <?php \$clsPrev = '$pre-page-link' . (\$page<=1 ? ' $pre-page-disabled' : ''); ?>
-        <a class="<?=str_replace('$pre', '$pre', '')?><?='';?>" class=""></a>
-        <a class="<?=$pre?>-page-link<?php if(\$page<=1) echo ' <?=$pre?>-page-disabled'; ?>" href="<?=\$page<=1?'#':\$pagelink(\$page-1)?>">Previous</a>
+        <?php
+          \$prevCls = '$pre-page-link' . (\$page<=1 ? ' $pre-page-disabled' : '');
+          \$nextCls = '$pre-page-link' . (\$page>=\$totalPages ? ' $pre-page-disabled' : '');
+        ?>
+        <a class="<?=\$prevCls?>" href="<?=\$page<=1?'#':\$pagelink(\$page-1)?>">Previous</a>
         <?php
           \$window = 2;
           \$start = max(1, \$page - \$window);
           \$end   = min(\$totalPages, \$page + \$window);
-          if (\$start > 1) echo '$ell';
+          if (\$start > 1) echo '<span class="$pre-page-ellipsis">…</span>';
           for (\$i=\$start; \$i<=\$end; \$i++) {
             \$cls = '$pre-page-link' . (\$i===\$page ? ' $pre-page-active' : '');
-            echo '<a class="'.str_replace('$pre','{$pre}',\$cls).'" href="'.\$pagelink(\$i).'">'.\$i.'</a>';
+            echo '<a class="'.\$cls.'" href="'.\$pagelink(\$i).'">'.\$i.'</a>';
           }
-          if (\$end < \$totalPages) echo '$ell';
+          if (\$end < \$totalPages) echo '<span class="$pre-page-ellipsis">…</span>';
         ?>
-        <a class="<?=$pre?>-page-link<?php if(\$page>=\$totalPages) echo ' <?=$pre?>-page-disabled'; ?>" href="<?=\$page>=\$totalPages?'#':\$pagelink(\$page+1)?>">Next</a>
+        <a class="<?=\$nextCls?>" href="<?=\$page>=\$totalPages?'#':\$pagelink(\$page+1)?>">Next</a>
       </nav>
       <?php endif; ?>
     </section>
@@ -415,7 +413,6 @@ PHP;
 
     private function articlePhp(string $pre, string $lang): string
     {
-        $cssPathPHP = "__DIR__ . '/../../public/assets/tailwind.css'";
         return <<<PHP
 <?php require __DIR__.'/partial-icons.php'; require __DIR__.'/partial-header.php';
 /** @var array \$post loaded by Router */
@@ -427,7 +424,7 @@ PHP;
 \$faqs    = \$post['faq'] ?? (\$post['faqs'] ?? []); // can be 'faq' or 'faqs'
 \$rssHref  = (\$config['base_url'] ?? '').'/rss.xml';
 \$atomHref = (\$config['base_url'] ?? '').'/atom.xml';
-\$cssver   = @filemtime($cssPathPHP) ?: time();
+\$cssver   = @filemtime(__DIR__ . '/../../public/assets/tailwind.css') ?: time();
 ?>
 <!doctype html>
 <html lang="<?=htmlspecialchars(\$config['lang'] ?? '$lang')?>">
