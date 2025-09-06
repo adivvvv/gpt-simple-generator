@@ -69,7 +69,7 @@ PHP;
 
     private function iconsSvg(string $prefix): string
     {
-        // Small subset of Heroicons paths (MIT). Local-only inline SVG. https://github.com/tailwindlabs/heroicons
+        // Small subset of Heroicons paths (MIT). Local-only inline SVG.
         return <<<'PHP'
 <?php
 // app/Templates/partial-icons.php (svg)
@@ -91,8 +91,6 @@ PHP;
 
     private function cssFromPlan(string $pre, array $p, array $t, array $l): string
     {
-        // Card and pagination variations (simple) + prose width & line-height tuned for readability.
-        // Typography defaults inspired by Tailwind Typography plugin (local, no build). https://github.com/tailwindlabs/tailwindcss-typography
         $card = [
             'soft'     => 'background:var(--cw-card); border:1px solid var(--cw-border); border-radius:.75rem; padding:1rem;',
             'outlined' => 'background:#fff; border:2px solid var(--cw-border); border-radius:.75rem; padding:1rem;',
@@ -192,6 +190,12 @@ $pag
 
 .$pre-refs{margin-top:1.5rem}
 .$pre-refs-list{max-width:{$t['measure_ch']}ch}
+
+/* FAQ */
+.$pre-faqs{margin-top:1.5rem}
+.$pre-faq{border:1px solid var(--cw-border);border-radius:.5rem;background:#fff;margin:.6rem 0;padding:.4rem .6rem}
+.$pre-faq summary{cursor:pointer;font-weight:600}
+.$pre-faq p{margin:.5rem 0 0}
 
 .$pre-cta{background:linear-gradient(180deg,#ffffff,#f8fafc); border-top:1px solid var(--cw-border); border-bottom:1px solid var(--cw-border)}
 .$pre-cta-box{max-width:{$t['measure_ch']}ch; margin:0 auto; padding:1rem 0; text-align:left}
@@ -295,8 +299,11 @@ PHP;
     }
 
     private function homePhp(string $pre, string $lang, array $copy, array $l): string
-  {
-    return <<<PHP
+    {
+        $disabledSuffix = " '{$pre}-page-disabled'";
+        $activeSuffix   = " '{$pre}-page-active'";
+
+        return <<<PHP
 <?php require __DIR__.'/partial-icons.php'; require __DIR__.'/partial-header.php';
 /** Pagination + posts */
 \$perPage = (int)(\$config['posts_per_page'] ?? 20);
@@ -314,8 +321,10 @@ if (is_file(\$idxFile)) {
 }
 \$totalPages = max(1, (int)ceil(\$total / \$perPage));
 
-/** Build a page link (kept local & safe; avoids dynamic function names) */
+/** Build a page link */
 \$pagelink = fn (int \$p): string => '?page=' . max(1, \$p) . '#recent';
+\$rssHref  = (\$config['base_url'] ?? '').'/rss.xml';
+\$atomHref = (\$config['base_url'] ?? '').'/atom.xml';
 ?>
 <!doctype html>
 <html lang="<?=htmlspecialchars(\$config['lang'] ?? '$lang')?>">
@@ -325,6 +334,8 @@ if (is_file(\$idxFile)) {
   <meta name="description" content="Evidence-first articles about camel milk — readable, fast, and text-only.">
   <link rel="canonical" href="<?=htmlspecialchars((\$config['base_url'] ?? '/'))?>">
   <link rel="stylesheet" href="/assets/tailwind.css">
+  <link rel="alternate" type="application/rss+xml"  title="<?=htmlspecialchars((\$config['site_name'] ?? 'CamelWay')).' RSS'?>"  href="<?=htmlspecialchars(\$rssHref)?>">
+  <link rel="alternate" type="application/atom+xml" title="<?=htmlspecialchars((\$config['site_name'] ?? 'CamelWay')).' Atom'?>" href="<?=htmlspecialchars(\$atomHref)?>">
 </head>
 <body class="$pre-body">
   <main class="$pre-container">
@@ -372,19 +383,19 @@ if (is_file(\$idxFile)) {
       <!-- Pagination -->
       <?php if (\$totalPages > 1): ?>
       <nav class="$pre-pagination" role="navigation" aria-label="Pagination">
-        <a class="{$pre}-page-link<?=\$page<=1?' '.$pre.'-page-disabled':''?>" href="<?=\$page<=1?'#':\$pagelink(\$page-1)?>">Previous</a>
+        <a class="{$pre}-page-link<?= \$page<=1 ? {$disabledSuffix} : '' ?>" href="<?=\$page<=1?'#':\$pagelink(\$page-1)?>">Previous</a>
         <?php
           \$window = 2;
           \$start = max(1, \$page - \$window);
           \$end   = min(\$totalPages, \$page + \$window);
-          if (\$start > 1) echo '<span class="'.$pre.'-page-ellipsis">…</span>';
+          if (\$start > 1) echo '<span class="{$pre}-page-ellipsis">…</span>';
           for (\$i=\$start; \$i<=\$end; \$i++) {
-            \$cls = '$pre-page-link'.(\$i===\$page?' '.$pre.'-page-active':'');
+            \$cls = '{$pre}-page-link'.(\$i===\$page ? {$activeSuffix} : '');
             echo '<a class="'.\$cls.'" href="'.\$pagelink(\$i).'">'.\$i.'</a>';
           }
-          if (\$end < \$totalPages) echo '<span class="'.$pre.'-page-ellipsis">…</span>';
+          if (\$end < \$totalPages) echo '<span class="{$pre}-page-ellipsis">…</span>';
         ?>
-        <a class="{$pre}-page-link<?=\$page>=\$totalPages?' '.$pre.'-page-disabled':''?>" href="<?=\$page>=\$totalPages?'#':\$pagelink(\$page+1)?>">Next</a>
+        <a class="{$pre}-page-link<?= \$page>=\$totalPages ? {$disabledSuffix} : '' ?>" href="<?=\$page>=\$totalPages?'#':\$pagelink(\$page+1)?>">Next</a>
       </nav>
       <?php endif; ?>
     </section>
@@ -393,8 +404,7 @@ if (is_file(\$idxFile)) {
 </body>
 </html>
 PHP;
-}
-
+    }
 
     private function articlePhp(string $pre, string $lang): string
     {
@@ -406,6 +416,9 @@ PHP;
 \$body    = \$post['body']    ?? (\$post['body_markdown'] ?? '');
 \$tags    = \$post['tags']    ?? [];
 \$pmids   = \$post['pmids']   ?? [];
+\$faqs    = \$post['faq'] ?? (\$post['faqs'] ?? []); // can be 'faq' or 'faqs'
+\$rssHref  = (\$config['base_url'] ?? '').'/rss.xml';
+\$atomHref = (\$config['base_url'] ?? '').'/atom.xml';
 ?>
 <!doctype html>
 <html lang="<?=htmlspecialchars(\$config['lang'] ?? '$lang')?>">
@@ -415,6 +428,8 @@ PHP;
   <meta name="description" content="<?=htmlspecialchars(\$summary)?>">
   <link rel="canonical" href="<?=htmlspecialchars((\$config['base_url'] ?? '/').'/'.(\$post['slug'] ?? ''))?>">
   <link rel="stylesheet" href="/assets/tailwind.css">
+  <link rel="alternate" type="application/rss+xml"  title="<?=htmlspecialchars((\$config['site_name'] ?? 'CamelWay')).' RSS'?>"  href="<?=htmlspecialchars(\$rssHref)?>">
+  <link rel="alternate" type="application/atom+xml" title="<?=htmlspecialchars((\$config['site_name'] ?? 'CamelWay')).' Atom'?>" href="<?=htmlspecialchars(\$atomHref)?>">
 </head>
 <body class="$pre-body">
   <main class="$pre-container">
@@ -432,6 +447,22 @@ PHP;
       </header>
 
       <div class="$pre-prose"><?php echo \$body; ?></div>
+
+      <?php if (!empty(\$faqs) && is_array(\$faqs)): ?>
+      <section class="$pre-faqs">
+        <h2 class="$pre-section-title">FAQ</h2>
+        <?php foreach (\$faqs as \$qa): 
+          \$q = trim((string)(\$qa['q'] ?? \$qa['question'] ?? ''));
+          \$a = trim((string)(\$qa['a'] ?? \$qa['answer'] ?? ''));
+          if (\$q === '' && \$a === '') continue;
+        ?>
+          <details class="$pre-faq">
+            <summary class="$pre-faq-q"><?=htmlspecialchars(\$q !== '' ? \$q : 'Question')?></summary>
+            <?php if (\$a !== ''): ?><div class="$pre-faq-a"><p><?=htmlspecialchars(\$a)?></p></div><?php endif; ?>
+          </details>
+        <?php endforeach; ?>
+      </section>
+      <?php endif; ?>
 
       <?php if (!empty(\$pmids) && is_array(\$pmids)): ?>
       <section class="$pre-refs">
