@@ -18,13 +18,13 @@ final class TemplateSynth
 
         // partial-icons.php (svg or unicode)
         $files[] = [
-            'path' => '/app/Templates/partial-icons.php',
+            'path'    => '/app/Templates/partial-icons.php',
             'content' => $l['icons'] === 'svg' ? $this->iconsSvg($prefix) : $this->iconsUnicode()
         ];
 
         // CSS
         $files[] = [
-            'path' => '/public/assets/tailwind.css',
+            'path'    => '/public/assets/tailwind.css',
             'content' => $this->cssFromPlan($prefix, $p, $t, $l)
         ];
 
@@ -56,11 +56,11 @@ final class TemplateSynth
 // app/Templates/partial-icons.php (unicode)
 function icon(string $name): string {
     $map = [
-        'arrow-right' => '→',
+        'arrow-right'   => '→',
         'chevron-right' => '›',
-        'calendar' => '📅',
-        'tag' => '#',
-        'shop' => '🛒',
+        'calendar'      => '📅',
+        'tag'           => '#',
+        'shop'          => '🛒',
     ];
     return $map[$name] ?? '•';
 }
@@ -75,11 +75,11 @@ PHP;
 // app/Templates/partial-icons.php (svg)
 function icon(string $name, string $cls = ''): string {
     $paths = [
-        'arrow-right' => 'M4.5 12h15m0 0-6-6m6 6-6 6',
+        'arrow-right'   => 'M4.5 12h15m0 0-6-6m6 6-6 6',
         'chevron-right' => 'M9 18l6-6-6-6',
-        'calendar' => 'M6.75 3v2.25M17.25 3v2.25M3 8.25h18M4.5 21h15A1.5 1.5 0 0021 19.5V7.5A1.5 1.5 0 0019.5 6h-15A1.5 1.5 0 003 7.5v12A1.5 1.5 0 004.5 21z',
-        'tag' => 'M2.25 12l8.25 8.25L21.75 9l-8.25-8.25H8.25L2.25 6.75v5.25z',
-        'shop' => 'M3 7.5l1.5-3h15L21 7.5M4.5 7.5h15V18a1.5 1.5 0 01-1.5 1.5h-12A1.5 1.5 0 014.5 18V7.5z',
+        'calendar'      => 'M6.75 3v2.25M17.25 3v2.25M3 8.25h18M4.5 21h15A1.5 1.5 0 0021 19.5V7.5A1.5 1.5 0 0019.5 6h-15A1.5 1.5 0 003 7.5v12A1.5 1.5 0 004.5 21z',
+        'tag'           => 'M2.25 12l8.25 8.25L21.75 9l-8.25-8.25H8.25L2.25 6.75v5.25z',
+        'shop'          => 'M3 7.5l1.5-3h15L21 7.5M4.5 7.5h15V18a1.5 1.5 0 01-1.5 1.5h-12A1.5 1.5 0 014.5 18V7.5z',
     ];
     if (!isset($paths[$name])) return '<span>•</span>';
     $d = $paths[$name];
@@ -91,7 +91,7 @@ PHP;
 
     private function cssFromPlan(string $pre, array $p, array $t, array $l): string
     {
-        // Compute accessible hover color (slightly darker accent).
+        // Accessible hover color (slightly darker accent).
         $accentHover = $this->darkenHex($p['accent'], 0.85);
 
         $card = [
@@ -131,7 +131,7 @@ PHP;
   --cw-border: {$p['border']};
 }
 *{box-sizing:border-box}
-html{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans","Helvetica Neue",Arial,"Apple Color Emoji","Segoe UI Emoji"; line-height:{$t['leading']} }
+html{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans","Helvetica Neue",Arial,"Apple Color Emoji","Segoe UI Emoji"; line-height:{$t['leading']}}
 body.$pre-body{margin:0;color:var(--cw-fg);background:var(--cw-bg);font-size:{$t['base_px']}px}
 .$pre-container{max-width:74rem;margin-inline:auto;padding:1rem}
 
@@ -191,14 +191,14 @@ $pag
 .$pre-prose blockquote{border-left:3px solid var(--cw-border);margin:1em 0;padding:.25rem .9rem;color:var(--cw-muted)}
 .$pre-disclaimer{margin-top:1rem;color:var(--cw-muted);font-size:.95rem}
 
+.$pre-refs{margin-top:1.5rem}
+.$pre-refs-list{max-width:{$t['measure_ch']}ch}
+
 /* FAQ */
 .$pre-faqs{margin-top:1.5rem}
 .$pre-faq{border:1px solid var(--cw-border);border-radius:.5rem;background:#fff;margin:.6rem 0;padding:.4rem .6rem}
 .$pre-faq summary{cursor:pointer;font-weight:600}
 .$pre-faq p{margin:.5rem 0 0}
-
-.$pre-refs{margin-top:1.5rem}
-.$pre-refs-list{max-width:{$t['measure_ch']}ch}
 
 .$pre-cta{background:linear-gradient(180deg,#ffffff,#f8fafc); border-top:1px solid var(--cw-border); border-bottom:1px solid var(--cw-border)}
 .$pre-cta-box{max-width:{$t['measure_ch']}ch; margin:0 auto; padding:1rem 0; text-align:left}
@@ -263,13 +263,14 @@ PHP;
 
     private function ctaPhp(string $pre, array $copy): string
     {
+        // Title/copy now configurable via settings.php; safe fallbacks remain.
         return <<<PHP
 <?php /** @var array \$config */ \$shop = \$config['shop_url'] ?? 'https://camelway.eu/'; ?>
 <section class="$pre-cta">
   <div class="$pre-container">
     <div class="$pre-cta-box">
-      <h2 class="$pre-cta-title">Premium Camel Milk Powder</h2>
-      <p class="$pre-cta-copy">Hypoallergenic, lactoferrin-rich nutrition — loved across Europe.</p>
+      <h2 class="$pre-cta-title"><?=htmlspecialchars(\$config['cta_title'] ?? 'Premium Camel Milk Powder')?></h2>
+      <p class="$pre-cta-copy"><?=htmlspecialchars(\$config['cta_copy'] ?? 'Hypoallergenic, lactoferrin-rich nutrition — loved across Europe.')?></p>
       <a class="$pre-button $pre-button-lg" href="<?=\$shop?>"><?=htmlspecialchars(\$config['cta_label'] ?? (\$copy['cta_label'] ?? 'Shop Now'))?> <?=(function_exists('icon') ? icon('arrow-right') : '→')?></a>
     </div>
   </div>
@@ -295,7 +296,7 @@ PHP;
         <a class="$pre-footer-link" href="<?=htmlspecialchars(\$l['href'])?>"><?=htmlspecialchars(\$l['label'])?></a>
       <?php endforeach; ?>
     </nav>
-    <p class="$pre-footer-note">© <?=date('Y')?> CamelWay — Educational content only; not medical advice.</p>
+    <p class="$pre-footer-note">© <?=date('Y')?> <?=htmlspecialchars(\$config['site_name'] ?? 'CamelWay')?> — Educational content only; not medical advice.</p>
   </div>
 </footer>
 PHP;
@@ -310,6 +311,7 @@ PHP;
 \$page    = max(1, (int)(\$_GET['page'] ?? 1));
 \$idxFile = __DIR__ . '/../../data/posts.json';
 \$posts   = [];
+\$all     = [];
 \$total   = 0;
 
 if (is_file(\$idxFile)) {
@@ -326,6 +328,29 @@ if (is_file(\$idxFile)) {
 \$rssHref  = (\$config['base_url'] ?? '').'/rss.xml';
 \$atomHref = (\$config['base_url'] ?? '').'/atom.xml';
 \$cssver   = @filemtime(__DIR__ . '/../../public/assets/tailwind.css') ?: time();
+
+/** JSON-LD for homepage: WebSite + ItemList of latest 20 */
+\$siteJsonLd = [
+  '@context' => 'https://schema.org',
+  '@type'    => 'WebSite',
+  'name'     => (string)(\$config['site_name'] ?? 'CamelWay'),
+  'url'      => (string)(\$config['base_url'] ?? '/'),
+];
+\$latestList = array_slice(\$all, 0, 20);
+\$items = [];
+foreach (\$latestList as \$i => \$p) {
+    \$items[] = [
+        '@type'    => 'ListItem',
+        'position' => \$i + 1,
+        'url'      => (string)((\$config['base_url'] ?? '').'/' . (\$p['slug'] ?? '')),
+        'name'     => (string)(\$p['title'] ?? '')
+    ];
+}
+\$listJsonLd = [
+  '@context'        => 'https://schema.org',
+  '@type'           => 'ItemList',
+  'itemListElement' => \$items
+];
 ?>
 <!doctype html>
 <html lang="<?=htmlspecialchars(\$config['lang'] ?? '$lang')?>">
@@ -337,6 +362,8 @@ if (is_file(\$idxFile)) {
   <link rel="stylesheet" href="/assets/tailwind.css?v=<?=rawurlencode((string)\$cssver)?>">
   <link rel="alternate" type="application/rss+xml"  title="<?=htmlspecialchars((\$config['site_name'] ?? 'CamelWay')).' RSS'?>"  href="<?=htmlspecialchars(\$rssHref)?>">
   <link rel="alternate" type="application/atom+xml" title="<?=htmlspecialchars((\$config['site_name'] ?? 'CamelWay')).' Atom'?>" href="<?=htmlspecialchars(\$atomHref)?>">
+  <script type="application/ld+json"><?=json_encode(\$siteJsonLd, JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE)?></script>
+  <script type="application/ld+json"><?=json_encode(\$listJsonLd, JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE)?></script>
 </head>
 <body class="$pre-body">
   <main class="$pre-container">
@@ -349,9 +376,6 @@ if (is_file(\$idxFile)) {
         <a class="$pre-link" href="#recent">Browse recent</a>
       </div>
     </section>
-
-    <!-- CTA -->
-    <?php require __DIR__.'/partial-cta.php'; ?>
 
     <!-- Recent list -->
     <section id="recent" class="$pre-section">
@@ -384,11 +408,7 @@ if (is_file(\$idxFile)) {
       <!-- Pagination -->
       <?php if (\$totalPages > 1): ?>
       <nav class="$pre-pagination" role="navigation" aria-label="Pagination">
-        <?php
-          \$prevCls = '$pre-page-link' . (\$page<=1 ? ' $pre-page-disabled' : '');
-          \$nextCls = '$pre-page-link' . (\$page>=\$totalPages ? ' $pre-page-disabled' : '');
-        ?>
-        <a class="<?=\$prevCls?>" href="<?=\$page<=1?'#':\$pagelink(\$page-1)?>">Previous</a>
+        <a class="$pre-page-link<?= \$page<=1 ? ' $pre-page-disabled' : '' ?>" href="<?=\$page<=1?'#':\$pagelink(\$page-1)?>">Previous</a>
         <?php
           \$window = 2;
           \$start = max(1, \$page - \$window);
@@ -400,10 +420,14 @@ if (is_file(\$idxFile)) {
           }
           if (\$end < \$totalPages) echo '<span class="$pre-page-ellipsis">…</span>';
         ?>
-        <a class="<?=\$nextCls?>" href="<?=\$page>=\$totalPages?'#':\$pagelink(\$page+1)?>">Next</a>
+        <a class="$pre-page-link<?= \$page>=\$totalPages ? ' $pre-page-disabled' : '' ?>" href="<?=\$page>=\$totalPages?'#':\$pagelink(\$page+1)?>">Next</a>
       </nav>
       <?php endif; ?>
     </section>
+
+    <!-- CTA moved to the bottom of HOME only -->
+    <?php require __DIR__.'/partial-cta.php'; ?>
+
   </main>
   <?php require __DIR__.'/partial-footer.php'; ?>
 </body>
@@ -425,6 +449,37 @@ PHP;
 \$rssHref  = (\$config['base_url'] ?? '').'/rss.xml';
 \$atomHref = (\$config['base_url'] ?? '').'/atom.xml';
 \$cssver   = @filemtime(__DIR__ . '/../../public/assets/tailwind.css') ?: time();
+
+/** JSON-LD for article + optional FAQ */
+\$url = (string)((\$config['base_url'] ?? '/').'/'.(\$post['slug'] ?? ''));
+\$articleJsonLd = [
+  '@context'        => 'https://schema.org',
+  '@type'           => 'BlogPosting',
+  'mainEntityOfPage'=> ['@type'=>'WebPage','@id'=>\$url],
+  'headline'        => (string)\$title,
+  'description'     => (string)\$summary,
+  'datePublished'   => (string)(\$post['published_at'] ?? ''),
+  'dateModified'    => (string)(\$post['updated_at'] ?? (\$post['published_at'] ?? '')),
+  'publisher'       => ['@type'=>'Organization','name'=>(string)(\$config['site_name'] ?? 'CamelWay')],
+  'url'             => \$url
+];
+\$faqJsonLd = null;
+if (!empty(\$faqs) && is_array(\$faqs)) {
+    \$qaList = [];
+    foreach (\$faqs as \$qa) {
+        \$q = trim((string)(\$qa['q'] ?? \$qa['question'] ?? ''));
+        \$a = trim((string)(\$qa['a'] ?? \$qa['answer'] ?? ''));
+        if (\$q === '' && \$a === '') continue;
+        \$qaList[] = [
+          '@type' => 'Question',
+          'name'  => \$q ?: 'Question',
+          'acceptedAnswer' => ['@type'=>'Answer', 'text'=> \$a]
+        ];
+    }
+    if (\$qaList) {
+        \$faqJsonLd = ['@context'=>'https://schema.org','@type'=>'FAQPage','mainEntity'=>\$qaList];
+    }
+}
 ?>
 <!doctype html>
 <html lang="<?=htmlspecialchars(\$config['lang'] ?? '$lang')?>">
@@ -432,10 +487,12 @@ PHP;
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title><?=htmlspecialchars(\$title)?> — <?=htmlspecialchars(\$config['site_name'] ?? 'CamelWay')?></title>
   <meta name="description" content="<?=htmlspecialchars(\$summary)?>">
-  <link rel="canonical" href="<?=htmlspecialchars((\$config['base_url'] ?? '/').'/'.(\$post['slug'] ?? ''))?>">
+  <link rel="canonical" href="<?=htmlspecialchars(\$url)?>">
   <link rel="stylesheet" href="/assets/tailwind.css?v=<?=rawurlencode((string)\$cssver)?>">
   <link rel="alternate" type="application/rss+xml"  title="<?=htmlspecialchars((\$config['site_name'] ?? 'CamelWay')).' RSS'?>"  href="<?=htmlspecialchars(\$rssHref)?>">
   <link rel="alternate" type="application/atom+xml" title="<?=htmlspecialchars((\$config['site_name'] ?? 'CamelWay')).' Atom'?>" href="<?=htmlspecialchars(\$atomHref)?>">
+  <script type="application/ld+json"><?=json_encode(\$articleJsonLd, JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE)?></script>
+  <?php if (\$faqJsonLd): ?><script type="application/ld+json"><?=json_encode(\$faqJsonLd, JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE)?></script><?php endif; ?>
 </head>
 <body class="$pre-body">
   <main class="$pre-container">
