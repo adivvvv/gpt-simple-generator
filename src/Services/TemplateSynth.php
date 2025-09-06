@@ -581,7 +581,11 @@ if (!empty(\$faqs) && is_array(\$faqs)) {
         <h2 class="$pre-section-title">Referenced studies</h2>
         <ol class="$pre-refs-list">
           <?php foreach (\$pmids as \$pm): ?>
-            <li><a href="<?= 'https://pubmed.ncbi.nlm.nih.gov/'.urlencode((string)\$pm).'/' ?>">PMID: <?=htmlspecialchars((string)\$pm)?></a></li>
+            <li>
+              <a href="<?= 'https://pubmed.ncbi.nlm.nih.gov/'.urlencode((string)\$pm).'/' ?>" target="_blank" rel="noopener noreferrer nofollow">
+                PMID: <?=htmlspecialchars((string)\$pm)?>
+              </a>
+            </li>
           <?php endforeach; ?>
         </ol>
       </section>
