@@ -25,7 +25,6 @@ final class OpenAIService
 
     /**
      * Generate a full article as strict JSON per article.schema.json
-     * Required fields include: title, slug, summary, body_markdown, faq, references, tags, subject
      */
     public function generateArticle(array $payload, array $refs, array $schema): array
     {
@@ -161,14 +160,14 @@ final class OpenAIService
             'required' => ['subject'],
             'additionalProperties' => false,
             'properties' => [
-                'subject' => ['type' => 'string']
+                'subject' => ['type'=>'string']
             ]
         ];
 
         $system = "Translate the given subject/title into {$lang}. Preserve meaning, brevity, and key terms (e.g., 'camel milk'). Return ONLY JSON with a single field 'subject'.";
         $inputBlocks = [
-            ['role' => 'system', 'content' => [['type' => 'input_text', 'text' => $system]]],
-            ['role' => 'user',   'content' => [['type' => 'input_text', 'text' => "SUBJECT:\n" . $subject]]],
+            ['role'=>'system','content'=>[['type'=>'input_text','text'=>$system]]],
+            ['role'=>'user','content'=>[['type'=>'input_text','text'=>"SUBJECT:\n".$subject]]],
         ];
 
         try {
@@ -182,13 +181,13 @@ final class OpenAIService
             $candidate = (string)($out['subject'] ?? '');
             return $candidate !== '' ? $candidate : $subject;
         } catch (\Throwable $e) {
-            Logger::error('translateSubject failed', ['err' => $e->getMessage()]);
+            Logger::error('translateSubject failed', ['err'=>$e->getMessage()]);
             return $subject;
         }
     }
 
     /**
-     * Generate a template plan.
+     * Generate a template plan (now seed-deterministic & varied).
      */
     public function generateTemplatePlan(string $lang, string $seed, array $styleFlags): array
     {
@@ -197,7 +196,6 @@ final class OpenAIService
             throw new \RuntimeException('template_plan.schema.json missing');
         }
 
-        // Stronger instruction: explicitly list required keys + enforce seed-driven variety
         $system = implode("\n", [
             "You are a senior web theme designer.",
             "Goal: Propose a small design system for a text-only, image-free, cookie-free, Tailwind-like site.",
@@ -225,10 +223,11 @@ final class OpenAIService
         ];
 
         $inputBlocks = [
-            ['role' => 'system', 'content' => [['type' => 'input_text', 'text' => $system]]],
-            ['role' => 'user',   'content' => [['type' => 'input_text', 'text' => "USER_PAYLOAD_JSON:\n" . json_encode($user, JSON_UNESCAPED_UNICODE)]]],
+            ['role'=>'system','content'=>[['type'=>'input_text','text'=>$system]]],
+            ['role'=>'user','content'=>[['type'=>'input_text','text'=>"USER_PAYLOAD_JSON:\n".json_encode($user, JSON_UNESCAPED_UNICODE)]]],
         ];
 
+        // 1) Ask the model
         $out = $this->responsesCall(
             model: Env::get('OPENAI_MODEL_UTIL', Env::get('OPENAI_MODEL_ARTICLE', 'gpt-5-mini')),
             inputBlocks: $inputBlocks,
@@ -237,37 +236,122 @@ final class OpenAIService
             temperature: 0.65
         );
 
-        // Harden required fields
-        // 1) seed MUST equal input (never trust model to override)
-        $out['seed'] = $seed;
+        // 2) Enforce deterministic variety from seed to avoid “same theme every time”
+        $out = $this->enforceSeedVariation($out, $seed, $styleFlags, $lang);
 
-        // 2) prefix fallback (valid + deterministic)
-        if (empty($out['prefix']) || !preg_match('/^[a-z][a-z0-9-]{1,14}$/', (string)$out['prefix'])) {
-            $out['prefix'] = 'cw-' . substr(preg_replace('/[^a-z0-9]/', '', strtolower(hash('sha1', $seed))), 0, 10);
-        }
-
-        // 3) name fallback (deterministic, readable) OR if too-generic pattern repeats
-        if (empty($out['name']) || preg_match('/^clean\\s+airy\\s+theme$/i', (string)$out['name'])) {
-            $out['name'] = $this->themeNameFromSeed($seed, $styleFlags, $lang);
-        }
-
-        // Final strict check (will now pass)
+        // Final strict check
         foreach (['seed','name','prefix','palette','type_scale','layout','copy'] as $k) {
             if (!isset($out[$k])) {
-                \App\Support\Logger::error('template plan missing key', ['key' => $k, 'out' => $out]);
-                throw new \RuntimeException('Template plan missing key: ' . $k);
+                \App\Support\Logger::error('template plan missing key', ['key'=>$k,'out'=>$out]);
+                throw new \RuntimeException('Template plan missing key: '.$k);
             }
+        }
+        return $out;
+    }
+
+    /** ---- helpers to force variety & accessibility ---- */
+
+    private function enforceSeedVariation(array $plan, string $seed, array $flags, string $lang): array
+    {
+        $plan['seed']   = $seed;
+        $plan['prefix'] = $this->prefixFromSeed($seed);
+
+        // Palette: if missing OR suspiciously generic, replace with seed-derived one
+        $p = (array)($plan['palette'] ?? []);
+        $looksGeneric = isset($p['accent']) && preg_match('/^#?0+7?b?f{2}$/i', (string)$p['accent']); // catches #007bff variants
+        if ($looksGeneric || !$this->isCompletePalette($p)) {
+            $plan['palette'] = $this->paletteFromSeed($seed);
+        }
+
+        // Type scale (stable but varied)
+        $plan['type_scale'] = $this->typeScaleFromSeed($seed);
+
+        // Layout variety
+        $given = (array)($plan['layout'] ?? []);
+        $plan['layout'] = $this->layoutFromSeed($seed, $given);
+
+        // Name fallback if blank or too generic
+        if (empty($plan['name']) || preg_match('/^(clean|classic)\s+(airy|serif)\s+(theme)$/i', (string)$plan['name'])) {
+            $plan['name'] = $this->themeNameFromSeed($seed, $flags, $lang);
+        }
+
+        // Copy fallback safety
+        if (empty($plan['copy']) || !is_array($plan['copy'])) {
+            $plan['copy'] = [
+                'hero_title'   => 'Camel Milk, Clearly Explained',
+                'hero_subtitle'=> 'Research-summarized, readable articles. No images, no tracking.',
+                'cta_label'    => 'Shop Now'
+            ];
+        }
+
+        return $plan;
+    }
+
+    private function isCompletePalette(array $p): bool
+    {
+        $req = ['bg','card','fg','muted','accent','accent_ink','border'];
+        foreach ($req as $k) if (!isset($p[$k]) || !is_string($p[$k]) || $p[$k]==='') return false;
+        return true;
+    }
+
+    private function prefixFromSeed(string $seed): string
+    {
+        // cw- + 3 base36 glyphs for short, unique prefixes (e.g., cw-a7k)
+        $h  = substr(hash('sha1', $seed), 0, 6);
+        $n  = base_convert($h, 16, 36);
+        return 'cw-' . substr($n, 0, 3);
+    }
+
+    private function paletteFromSeed(string $seed): array
+    {
+        // HSL-ish palette: accent from seed hue; rest are neutral & accessible
+        $hue = hexdec(substr(hash('sha1',$seed), 0, 2)) % 360;
+        $accent = $this->hslToHex($hue, 72, 48);       // vivid but not neon
+        $border = $this->hslToHex(($hue+2)%360, 10, 86);
+        return [
+            'bg'         => '#ffffff',
+            'card'       => '#f8fafc',
+            'fg'         => '#111827',  // gray-900
+            'muted'      => '#6b7280',  // gray-500
+            'accent'     => $accent,
+            'accent_ink' => '#ffffff',  // text on accent
+            'border'     => $border
+        ];
+    }
+
+    private function typeScaleFromSeed(string $seed): array
+    {
+        $h = hexdec(substr(hash('sha1', $seed), 0, 6));
+        $base   = 15 + ($h % 5);              // 15..19
+        $lead   = 1.45 + (($h >> 3) % 36)/100; // 1.45..1.81
+        $measure= 58 + (($h >> 5) % 19);      // 58..76
+        return ['base_px'=>$base,'leading'=>round($lead,2),'measure_ch'=>$measure];
+    }
+
+    private function layoutFromSeed(string $seed, array $given): array
+    {
+        $options = [
+            'header_variant'     => ['rail','stacked','double'],
+            'hero_variant'       => ['center-thin','left-stacked','boxed'],
+            'card_variant'       => ['soft','outlined','lined'],
+            'pagination_variant' => ['minimal','pill','boxed'],
+            'icons'              => ['svg','unicode'],
+        ];
+        $h = hexdec(substr(hash('sha1',$seed), 0, 16));
+        $out = [];
+        $i = 0;
+        foreach ($options as $k => $vals) {
+            $out[$k] = $given[$k] ?? $vals[ ($h >> ($i*3)) % count($vals) ];
+            $i++;
         }
         return $out;
     }
 
     /**
      * Deterministic, short theme name from seed + flags.
-     * Example outputs: "Desert Olive", "Saffron Rail", "Quartz Serif".
      */
     private function themeNameFromSeed(string $seed, array $styleFlags, string $lang = 'en'): string
     {
-        // NB: language-sensitive naming can be added later; keep EN now.
         $adjectives = [
             'Desert','Olive','Saffron','Quartz','Azure','Ivory','Cedar','Marble','Amber','Linen',
             'Slate','Moss','Drift','Velvet','Amberlite','Nimbus','Cinder','Aster','Wheat','Sienna'
@@ -276,20 +360,37 @@ final class OpenAIService
             'Breeze','Rail','Serif','Canvas','Page','Note','Read','Column','Verse','Glyph',
             'Frame','Fold','Scroll','Ledger','Quill','Outline','Accent','Stream','Cluster','Atlas'
         ];
-        // Pick indexes from seed hash
         $h = hexdec(substr(hash('sha1', $seed), 0, 8));
         $a = $adjectives[$h % count($adjectives)];
         $b = $nouns[($h >> 5) % count($nouns)];
 
-        // Nudge for flags
-        $flagNudge = '';
         $flags = array_map('strtolower', $styleFlags);
         if (in_array('serifish', $flags, true) && !in_array($b, ['Serif','Ledger','Quill'], true)) $b = 'Serif';
-        if (in_array('boxed', $flags, true)   && !in_array($b, ['Frame','Canvas','Ledger'], true)) $flagNudge = ' Frame';
+        if (in_array('boxed', $flags, true)   && !in_array($b, ['Frame','Canvas','Ledger'], true)) $b = 'Frame';
         if (in_array('airy', $flags, true)    && !in_array($a, ['Breeze','Nimbus'], true))         $a = 'Breeze';
 
-        return trim("$a $b$flagNudge");
+        return trim("$a $b");
     }
+
+    private function hslToHex(int $h, int $s, int $l): string
+    {
+        $s = max(0, min(100, $s)) / 100;
+        $l = max(0, min(100, $l)) / 100;
+        $c = (1 - abs(2*$l - 1)) * $s;
+        $x = $c * (1 - abs(fmod($h/60, 2) - 1));
+        $m = $l - $c/2;
+        [$r,$g,$b] = [0,0,0];
+        if ($h < 60)      [$r,$g,$b] = [$c,$x,0];
+        elseif ($h < 120) [$r,$g,$b] = [$x,$c,0];
+        elseif ($h < 180) [$r,$g,$b] = [0,$c,$x];
+        elseif ($h < 240) [$r,$g,$b] = [0,$x,$c];
+        elseif ($h < 300) [$r,$g,$b] = [$x,0,$c];
+        else              [$r,$g,$b] = [$c,0,$x];
+        $to = fn(float $v) => str_pad(dechex((int)round(($v+$m)*255)), 2, '0', STR_PAD_LEFT);
+        return '#'.$to($r).$to($g).$to($b);
+    }
+
+    /** ------------ low-level OpenAI plumbing ------------ */
 
     private function responsesCall(string $model, array $inputBlocks, string $schemaName, array $schema, float $temperature): array
     {
@@ -377,26 +478,20 @@ final class OpenAIService
             throw new \RuntimeException('OpenAI returned invalid JSON.');
         }
 
-        // 1) Preferred: responses content blocks with type=output_json
         if (isset($data['output']) && is_array($data['output'])) {
             foreach ($data['output'] as $o) {
                 if (!isset($o['content']) || !is_array($o['content'])) continue;
                 foreach ($o['content'] as $c) {
-                    // Modern structured path
                     if (($c['type'] ?? '') === 'output_json' && isset($c['json']) && is_array($c['json'])) {
                         return $c['json'];
                     }
                 }
             }
         }
-
-        // 2) Next best: top-level output_text
         if (isset($data['output_text']) && is_string($data['output_text']) && trim($data['output_text']) !== '') {
             $try = json_decode($data['output_text'], true);
             if (is_array($try)) return $try;
         }
-
-        // 3) Fallback: scan any content[text] blocks for a JSON object
         if (isset($data['output']) && is_array($data['output'])) {
             foreach ($data['output'] as $o) {
                 if (!isset($o['content']) || !is_array($o['content'])) continue;
@@ -411,7 +506,6 @@ final class OpenAIService
             }
         }
 
-        // Nothing parseable
         \App\Support\Logger::error('OpenAI unexpected shape', ['sample' => substr(json_encode($data), 0, 1000)]);
         throw new \RuntimeException('OpenAI response missing valid JSON.');
     }
