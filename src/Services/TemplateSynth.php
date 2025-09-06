@@ -247,17 +247,26 @@ HTML : '';
 \$shop = \$config['shop_url']  ?? 'https://camelway.eu/';
 \$base = \$config['base_url']  ?? '/';
 
-/* Robust latest posts loader (works with both index paths; scans as fallback) */
+/* Where is data? Allow settings.php override via 'data_dir'. */
+\$dataOverride = isset(\$config['data_dir']) && is_string(\$config['data_dir']) && \$config['data_dir'] !== '' ? rtrim(\$config['data_dir'], '/')
+              : null;
+
+/* Robust latest posts loader (works with multiple layouts & overrides) */
 \$latest = [];
-\$candidates = [
-    __DIR__ . '/../../data/posts.json',        // current location
-    __DIR__ . '/../../data/posts/posts.json',  // legacy placeholder path
-];
+\$root1  = realpath(dirname(__DIR__, 2)); // project root
+\$candidates = [];
+if (\$dataOverride) {
+    \$candidates[] = \$dataOverride . '/posts.json';
+}
+if (\$root1) {
+    \$candidates[] = \$root1 . '/data/posts.json';        // current location
+    \$candidates[] = \$root1 . '/data/posts/posts.json';  // legacy placeholder path
+}
 \$found = false;
 foreach (\$candidates as \$c) {
     if (is_file(\$c)) {
         \$j = json_decode((string)file_get_contents(\$c), true);
-        if (is_array(\$j) && !empty(\$j['posts'])) {
+        if (is_array(\$j) && !empty(\$j['posts']) && is_array(\$j['posts'])) {
             \$latest = array_slice(\$j['posts'], 0, 10);
             \$found = true;
             break;
@@ -265,18 +274,25 @@ foreach (\$candidates as \$c) {
     }
 }
 if (!\$found) {
-    \$dir = __DIR__ . '/../../data/posts';
-    if (is_dir(\$dir)) {
-        \$tmp = [];
-        foreach (glob(\$dir.'/*.json') as \$f) {
-            \$x = json_decode((string)file_get_contents(\$f), true);
-            if (!is_array(\$x)) continue;
-            \$tmp[] = [
-                'title' => (string)(\$x['title'] ?? basename(\$f, '.json')),
-                'slug'  => (string)(\$x['slug']  ?? basename(\$f, '.json')),
-            ];
+    \$dirs = [];
+    if (\$dataOverride) \$dirs[] = \$dataOverride . '/posts';
+    if (\$root1)        \$dirs[] = \$root1 . '/data/posts';
+    foreach (\$dirs as \$dir) {
+        if (is_dir(\$dir)) {
+            \$tmp = [];
+            foreach (glob(\$dir.'/*.json') as \$f) {
+                \$x = json_decode((string)file_get_contents(\$f), true);
+                if (!is_array(\$x)) continue;
+                \$tmp[] = [
+                    'title' => (string)(\$x['title'] ?? basename(\$f, '.json')),
+                    'slug'  => (string)(\$x['slug']  ?? basename(\$f, '.json')),
+                ];
+            }
+            if (\$tmp) {
+                \$latest = array_slice(\$tmp, 0, 10);
+                break;
+            }
         }
-        \$latest = array_slice(\$tmp, 0, 10);
     }
 }
 ?>
@@ -304,7 +320,7 @@ PHP;
     <div class="$pre-cta-box">
       <h2 class="$pre-cta-title"><?=htmlspecialchars(\$config['cta_title'] ?? 'Premium Camel Milk Powder')?></h2>
       <p class="$pre-cta-copy"><?=htmlspecialchars(\$config['cta_copy'] ?? 'Hypoallergenic, lactoferrin-rich nutrition — loved across Europe.')?></p>
-      <a class="$pre-button $pre-button-lg" href="<?=\$shop?>"><?=htmlspecialchars(\$config['cta_label'] ?? (\$copy['cta_label'] ?? '$L_shop'))?> <?=(function_exists('icon') ? icon('arrow-right') : '→')?></a>
+      <a class="$pre-button $pre-button-lg" href="<?=\$shop?>"><?=htmlspecialchars(\$config['cta_label'] ?? (\$copy['cta_label'] ?? '{$L_shop}'))?> <?=(function_exists('icon') ? icon('arrow-right') : '→')?></a>
     </div>
   </div>
 </section>
@@ -329,7 +345,7 @@ PHP;
         <a class="$pre-footer-link" href="<?=htmlspecialchars(\$l['href'])?>"><?=htmlspecialchars(\$l['label'])?></a>
       <?php endforeach; ?>
     </nav>
-    <p class="$pre-footer-note">© <?=date('Y')?> <?=htmlspecialchars(\$config['site_name'] ?? 'CamelWay')?> — <?=htmlspecialchars('$L_disclaimer_full')?>.</p>
+    <p class="$pre-footer-note">© <?=date('Y')?> <?=htmlspecialchars(\$config['site_name'] ?? 'CamelWay')?> — <?=htmlspecialchars('{$L_disclaimer_full}')?>.</p>
   </div>
 </footer>
 PHP;
@@ -339,16 +355,29 @@ PHP;
     {
         return <<<PHP
 <?php require __DIR__.'/partial-icons.php'; require __DIR__.'/partial-header.php';
+/** @var array \$config */
+
 /** Pagination + posts */
 \$perPage = (int)(\$config['posts_per_page'] ?? 20);
+if (\$perPage <= 0) \$perPage = 20; // safety
 \$page    = max(1, (int)(\$_GET['page'] ?? 1));
 
-/* Robust posts index loader (supports both paths; scans as fallback) */
+/* Where is data? Allow settings.php override via 'data_dir'. */
+\$dataOverride = isset(\$config['data_dir']) && is_string(\$config['data_dir']) && \$config['data_dir'] !== '' ? rtrim(\$config['data_dir'], '/')
+              : null;
+
+/* Robust posts index loader (supports overrides; scans as fallback) */
 \$all = [];
-\$candidates = [
-  __DIR__ . '/../../data/posts.json',
-  __DIR__ . '/../../data/posts/posts.json',
-];
+\$root1  = realpath(dirname(__DIR__, 2)); // project root
+\$candidates = [];
+if (\$dataOverride) {
+  \$candidates[] = \$dataOverride . '/posts.json';
+}
+if (\$root1) {
+  \$candidates[] = \$root1 . '/data/posts.json';
+  \$candidates[] = \$root1 . '/data/posts/posts.json';
+}
+
 foreach (\$candidates as \$c) {
   if (is_file(\$c)) {
     \$j = json_decode((string)file_get_contents(\$c), true);
@@ -360,27 +389,36 @@ foreach (\$candidates as \$c) {
 }
 if (!\$all) {
   // Final fallback: scan post files and build a minimal index
-  \$dir = __DIR__ . '/../../data/posts';
-  if (is_dir(\$dir)) {
-    foreach (glob(\$dir.'/*.json') as \$f) {
-      \$x = json_decode((string)file_get_contents(\$f), true);
-      if (!is_array(\$x)) continue;
-      \$all[] = [
-        'title'        => (string)(\$x['title'] ?? basename(\$f, '.json')),
-        'slug'         => (string)(\$x['slug']  ?? basename(\$f, '.json')),
-        'summary'      => (string)(\$x['summary'] ?? ''),
-        'tags'         => (array) (\$x['tags'] ?? []),
-        'published_at' => (string)(\$x['published_at'] ?? date('Y-m-d', @filemtime(\$f) ?: time())),
-      ];
+  \$dirs = [];
+  if (\$dataOverride) \$dirs[] = \$dataOverride . '/posts';
+  if (\$root1)        \$dirs[] = \$root1 . '/data/posts';
+  foreach (\$dirs as \$dir) {
+    if (is_dir(\$dir)) {
+      \$tmp = [];
+      foreach (glob(\$dir.'/*.json') as \$f) {
+        \$x = json_decode((string)file_get_contents(\$f), true);
+        if (!is_array(\$x)) continue;
+        \$tmp[] = [
+          'title'        => (string)(\$x['title'] ?? basename(\$f, '.json')),
+          'slug'         => (string)(\$x['slug']  ?? basename(\$f, '.json')),
+          'summary'      => (string)(\$x['summary'] ?? ''),
+          'tags'         => (array) (\$x['tags'] ?? []),
+          'published_at' => (string)(\$x['published_at'] ?? date('Y-m-d', @filemtime(\$f) ?: time())),
+        ];
+      }
+      if (\$tmp) {
+        usort(\$tmp, fn(\$a,\$b) => strcmp((\$b['published_at'] ?? '').(\$b['slug'] ?? ''), (\$a['published_at'] ?? '').(\$a['slug'] ?? '')));
+        \$all = \$tmp;
+        break;
+      }
     }
-    usort(\$all, fn(\$a,\$b) => strcmp((\$b['published_at'] ?? '').(\$b['slug'] ?? ''), (\$a['published_at'] ?? '').(\$a['slug'] ?? '')));
   }
 }
 
 \$total = count(\$all);
 \$start = (\$page - 1) * \$perPage;
 \$posts = array_slice(\$all, \$start, \$perPage);
-\$totalPages = max(1, (int)ceil(\$total / \$perPage));
+\$totalPages = max(1, (int)ceil(max(1, \$total) / \$perPage));
 
 /** Build a page link */
 \$pagelink = fn (int \$p): string => '?page=' . max(1, \$p) . '#recent';
@@ -397,12 +435,12 @@ if (!\$all) {
 ];
 \$latestList = array_slice(\$all, 0, 20);
 \$items = [];
-foreach (\$latestList as \$i => \$p) {
+foreach (\$latestList as \$i => \$pItem) {
   \$items[] = [
     '@type'    => 'ListItem',
     'position' => \$i + 1,
-    'url'      => (string)((\$config['base_url'] ?? '').'/'.(\$p['slug'] ?? '')),
-    'name'     => (string)(\$p['title'] ?? ''),
+    'url'      => (string)((\$config['base_url'] ?? '').'/'.(\$pItem['slug'] ?? '')),
+    'name'     => (string)(\$pItem['title'] ?? ''),
   ];
 }
 \$listJsonLd = ['@context'=>'https://schema.org','@type'=>'ItemList','itemListElement'=>\$items];
@@ -427,7 +465,7 @@ foreach (\$latestList as \$i => \$p) {
       <h1 class="$pre-hero-title"><?=htmlspecialchars(\$config['hero_title'] ?? (\$copy['hero_title'] ?? 'Camel Milk, Clearly Explained'))?></h1>
       <p class="$pre-hero-sub"><?=htmlspecialchars(\$config['hero_subtitle'] ?? (\$copy['hero_subtitle'] ?? 'Research-summarized, readable articles. No images, no tracking — just fast, accessible pages.'))?></p>
       <div class="$pre-hero-actions" style="margin-top:1rem;display:flex;gap:.75rem;align-items:center">
-        <a class="$pre-button $pre-button-lg" href="<?=\$config['shop_url'] ?? 'https://camelway.eu/'?>"><?=htmlspecialchars(\$config['cta_label'] ?? (\$copy['cta_label'] ?? '$L_shop'))?> <?=(function_exists('icon') ? icon('arrow-right') : '→')?></a>
+        <a class="$pre-button $pre-button-lg" href="<?=\$config['shop_url'] ?? 'https://camelway.eu/'?>"><?=htmlspecialchars(\$config['cta_label'] ?? (\$copy['cta_label'] ?? '{$L_shop}'))?> <?=(function_exists('icon') ? icon('arrow-right') : '→')?></a>
         <a class="$pre-link" href="#recent">{$Le['browse_recent']}</a>
       </div>
     </section>
