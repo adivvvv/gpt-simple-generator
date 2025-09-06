@@ -14,6 +14,14 @@ final class TemplateSynth
         $l      = $plan['layout'];
         $copy   = $plan['copy'];
 
+        // i18n labels for static UI strings
+        $L  = $this->i18n($lang);
+        // Pre-escaped variants for safe literal injection into generated templates
+        $Le = [];
+        foreach ($L as $k => $v) { $Le[$k] = htmlspecialchars($v, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); }
+        $L_shop = $this->phpStr($L['shop_now']); // for use inside single-quoted PHP strings
+        $L_disclaimer_full = $this->phpStr($L['disclaimer_full']);
+
         $files = [];
 
         // partial-icons.php (svg or unicode)
@@ -29,13 +37,13 @@ final class TemplateSynth
         ];
 
         // Header / CTA / Footer
-        $files[] = ['path'=>'/app/Templates/partial-header.php', 'content'=>$this->headerPhp($prefix, $l)];
-        $files[] = ['path'=>'/app/Templates/partial-cta.php',    'content'=>$this->ctaPhp($prefix, $copy)];
-        $files[] = ['path'=>'/app/Templates/partial-footer.php', 'content'=>$this->footerPhp($prefix)];
+        $files[] = ['path'=>'/app/Templates/partial-header.php', 'content'=>$this->headerPhp($prefix, $l, $Le)];
+        $files[] = ['path'=>'/app/Templates/partial-cta.php',    'content'=>$this->ctaPhp($prefix, $copy, $L_shop)];
+        $files[] = ['path'=>'/app/Templates/partial-footer.php', 'content'=>$this->footerPhp($prefix, $Le, $L_disclaimer_full)];
 
         // Home + Article
-        $files[] = ['path'=>'/app/Templates/home.php',    'content'=>$this->homePhp($prefix, $lang, $copy, $l)];
-        $files[] = ['path'=>'/app/Templates/article.php', 'content'=>$this->articlePhp($prefix, $lang)];
+        $files[] = ['path'=>'/app/Templates/home.php',    'content'=>$this->homePhp($prefix, $lang, $copy, $l, $Le, $L_shop)];
+        $files[] = ['path'=>'/app/Templates/article.php', 'content'=>$this->articlePhp($prefix, $lang, $Le)];
 
         return [
             'name'  => $plan['name'],
@@ -217,12 +225,12 @@ $pag
 CSS;
     }
 
-    private function headerPhp(string $pre, array $l): string
-{
-    $rail = $l['header_variant'] === 'rail' ? <<<HTML
+    private function headerPhp(string $pre, array $l, array $Le): string
+    {
+        $rail = $l['header_variant'] === 'rail' ? <<<HTML
   <?php if (\$latest): ?>
-  <div class="$pre-header-rail" aria-label="Latest articles">
-    <span class="$pre-rail-label">Latest:</span>
+  <div class="$pre-header-rail" aria-label="{$Le['latest_aria']}">
+    <span class="$pre-rail-label">{$Le['latest']}:</span>
     <div class="$pre-rail-list">
       <?php foreach (\$latest as \$p): ?>
         <a class="$pre-rail-item" href="\$base/<?=htmlspecialchars(\$p['slug'] ?? '')?>"><?=htmlspecialchars(\$p['title'] ?? '')?></a>
@@ -232,7 +240,7 @@ CSS;
   <?php endif; ?>
 HTML : '';
 
-    return <<<PHP
+        return <<<PHP
 <?php
 /** @var array \$config */
 \$site = \$config['site_name'] ?? 'CamelWay';
@@ -276,18 +284,17 @@ if (!\$found) {
   <div class="$pre-container $pre-header-bar">
     <a class="$pre-brand" href="<?=\$base?>"><?=htmlspecialchars(\$site)?></a>
     <nav class="$pre-nav">
-      <a class="$pre-nav-link" href="<?=\$base?>">Home</a>
-      <a class="$pre-nav-link" href="<?=\$base?>?page=1#recent">Recent</a>
-      <a class="$pre-button" href="<?=\$shop?>">Shop Now <?=(function_exists('icon') ? icon('arrow-right') : '→')?></a>
+      <a class="$pre-nav-link" href="<?=\$base?>">{$Le['home']}</a>
+      <a class="$pre-nav-link" href="<?=\$base?>?page=1#recent">{$Le['recent']}</a>
+      <a class="$pre-button" href="<?=\$shop?>">{$Le['shop_now']} <?=(function_exists('icon') ? icon('arrow-right') : '→')?></a>
     </nav>
   </div>
   {$rail}
 </header>
 PHP;
-}
+    }
 
-
-    private function ctaPhp(string $pre, array $copy): string
+    private function ctaPhp(string $pre, array $copy, string $L_shop): string
     {
         // Title/copy now configurable via settings.php; safe fallbacks remain.
         return <<<PHP
@@ -297,14 +304,14 @@ PHP;
     <div class="$pre-cta-box">
       <h2 class="$pre-cta-title"><?=htmlspecialchars(\$config['cta_title'] ?? 'Premium Camel Milk Powder')?></h2>
       <p class="$pre-cta-copy"><?=htmlspecialchars(\$config['cta_copy'] ?? 'Hypoallergenic, lactoferrin-rich nutrition — loved across Europe.')?></p>
-      <a class="$pre-button $pre-button-lg" href="<?=\$shop?>"><?=htmlspecialchars(\$config['cta_label'] ?? (\$copy['cta_label'] ?? 'Shop Now'))?> <?=(function_exists('icon') ? icon('arrow-right') : '→')?></a>
+      <a class="$pre-button $pre-button-lg" href="<?=\$shop?>"><?=htmlspecialchars(\$config['cta_label'] ?? (\$copy['cta_label'] ?? '$L_shop'))?> <?=(function_exists('icon') ? icon('arrow-right') : '→')?></a>
     </div>
   </div>
 </section>
 PHP;
     }
 
-    private function footerPhp(string $pre): string
+    private function footerPhp(string $pre, array $Le, string $L_disclaimer_full): string
     {
         return <<<PHP
 <?php /** @var array \$config */
@@ -322,15 +329,15 @@ PHP;
         <a class="$pre-footer-link" href="<?=htmlspecialchars(\$l['href'])?>"><?=htmlspecialchars(\$l['label'])?></a>
       <?php endforeach; ?>
     </nav>
-    <p class="$pre-footer-note">© <?=date('Y')?> <?=htmlspecialchars(\$config['site_name'] ?? 'CamelWay')?> — Educational content only; not medical advice.</p>
+    <p class="$pre-footer-note">© <?=date('Y')?> <?=htmlspecialchars(\$config['site_name'] ?? 'CamelWay')?> — <?=htmlspecialchars('$L_disclaimer_full')?>.</p>
   </div>
 </footer>
 PHP;
     }
 
-    private function homePhp(string $pre, string $lang, array $copy, array $l): string
-{
-    return <<<PHP
+    private function homePhp(string $pre, string $lang, array $copy, array $l, array $Le, string $L_shop): string
+    {
+        return <<<PHP
 <?php require __DIR__.'/partial-icons.php'; require __DIR__.'/partial-header.php';
 /** Pagination + posts */
 \$perPage = (int)(\$config['posts_per_page'] ?? 20);
@@ -420,16 +427,16 @@ foreach (\$latestList as \$i => \$p) {
       <h1 class="$pre-hero-title"><?=htmlspecialchars(\$config['hero_title'] ?? (\$copy['hero_title'] ?? 'Camel Milk, Clearly Explained'))?></h1>
       <p class="$pre-hero-sub"><?=htmlspecialchars(\$config['hero_subtitle'] ?? (\$copy['hero_subtitle'] ?? 'Research-summarized, readable articles. No images, no tracking — just fast, accessible pages.'))?></p>
       <div class="$pre-hero-actions" style="margin-top:1rem;display:flex;gap:.75rem;align-items:center">
-        <a class="$pre-button $pre-button-lg" href="<?=\$config['shop_url'] ?? 'https://camelway.eu/'?>"><?=htmlspecialchars(\$config['cta_label'] ?? (\$copy['cta_label'] ?? 'Shop Now'))?> <?=(function_exists('icon') ? icon('arrow-right') : '→')?></a>
-        <a class="$pre-link" href="#recent">Browse recent</a>
+        <a class="$pre-button $pre-button-lg" href="<?=\$config['shop_url'] ?? 'https://camelway.eu/'?>"><?=htmlspecialchars(\$config['cta_label'] ?? (\$copy['cta_label'] ?? '$L_shop'))?> <?=(function_exists('icon') ? icon('arrow-right') : '→')?></a>
+        <a class="$pre-link" href="#recent">{$Le['browse_recent']}</a>
       </div>
     </section>
 
     <!-- Recent list -->
     <section id="recent" class="$pre-section">
-      <h2 class="$pre-section-title">Recent articles</h2>
+      <h2 class="$pre-section-title">{$Le['recent_articles']}</h2>
       <?php if (!\$posts): ?>
-        <p>No posts yet. Come back soon.</p>
+        <p>{$Le['no_posts']}</p>
       <?php else: ?>
         <ol class="$pre-list">
           <?php foreach (\$posts as \$p): ?>
@@ -456,7 +463,7 @@ foreach (\$latestList as \$i => \$p) {
       <!-- Pagination -->
       <?php if (\$totalPages > 1): ?>
       <nav class="$pre-pagination" role="navigation" aria-label="Pagination">
-        <a class="$pre-page-link<?= \$page<=1 ? ' $pre-page-disabled' : '' ?>" href="<?=\$page<=1?'#':\$pagelink(\$page-1)?>">Previous</a>
+        <a class="$pre-page-link<?= \$page<=1 ? ' $pre-page-disabled' : '' ?>" href="<?=\$page<=1?'#':\$pagelink(\$page-1)?>">{$Le['previous']}</a>
         <?php
           \$window = 2;
           \$start = max(1, \$page - \$window);
@@ -468,7 +475,7 @@ foreach (\$latestList as \$i => \$p) {
           }
           if (\$end < \$totalPages) echo '<span class="$pre-page-ellipsis">…</span>';
         ?>
-        <a class="$pre-page-link<?= \$page>=\$totalPages ? ' $pre-page-disabled' : '' ?>" href="<?=\$page>=\$totalPages?'#':\$pagelink(\$page+1)?>">Next</a>
+        <a class="$pre-page-link<?= \$page>=\$totalPages ? ' $pre-page-disabled' : '' ?>" href="<?=\$page>=\$totalPages?'#':\$pagelink(\$page+1)?>">{$Le['next']}</a>
       </nav>
       <?php endif; ?>
     </section>
@@ -481,10 +488,9 @@ foreach (\$latestList as \$i => \$p) {
 </body>
 </html>
 PHP;
-}
+    }
 
-
-    private function articlePhp(string $pre, string $lang): string
+    private function articlePhp(string $pre, string $lang, array $Le): string
     {
         return <<<PHP
 <?php require __DIR__.'/partial-icons.php'; require __DIR__.'/partial-header.php';
@@ -562,7 +568,7 @@ if (!empty(\$faqs) && is_array(\$faqs)) {
 
       <?php if (!empty(\$faqs) && is_array(\$faqs)): ?>
       <section class="$pre-faqs">
-        <h2 class="$pre-section-title">FAQ</h2>
+        <h2 class="$pre-section-title">{$Le['faq']}</h2>
         <?php foreach (\$faqs as \$qa):
           \$q = trim((string)(\$qa['q'] ?? \$qa['question'] ?? ''));
           \$a = trim((string)(\$qa['a'] ?? \$qa['answer'] ?? ''));
@@ -578,11 +584,11 @@ if (!empty(\$faqs) && is_array(\$faqs)) {
 
       <?php if (!empty(\$pmids) && is_array(\$pmids)): ?>
       <section class="$pre-refs">
-        <h2 class="$pre-section-title">Referenced studies</h2>
+        <h2 class="$pre-section-title">{$Le['refs']}</h2>
         <ol class="$pre-refs-list">
           <?php foreach (\$pmids as \$pm): ?>
             <li>
-              <a href="<?= 'https://pubmed.ncbi.nlm.nih.gov/'.urlencode((string)\$pm).'/' ?>" target="_blank" rel="noopener noreferrer nofollow">
+              <a href="<?= 'https://pubmed.ncbi.nlm.nih.gov/'.urlencode((string)\$pm).'/' ?>" target="_blank" rel="noopener noreferrer">
                 PMID: <?=htmlspecialchars((string)\$pm)?>
               </a>
             </li>
@@ -591,7 +597,7 @@ if (!empty(\$faqs) && is_array(\$faqs)) {
       </section>
       <?php endif; ?>
 
-      <p class="$pre-disclaimer">Educational content. Not medical advice.</p>
+      <p class="$pre-disclaimer">{$Le['disclaimer_short']}</p>
     </article>
 
     <?php require __DIR__.'/partial-cta.php'; ?>
@@ -611,5 +617,119 @@ PHP;
         $g = max(0, min(255, (int)round(hexdec(substr($hex,2,2)) * $factor)));
         $b = max(0, min(255, (int)round(hexdec(substr($hex,4,2)) * $factor)));
         return sprintf('#%02x%02x%02x', $r,$g,$b);
+    }
+
+    /** Escape for embedding inside single-quoted PHP string literals */
+    private function phpStr(string $s): string
+    {
+        return str_replace(["\\", "'"], ["\\\\", "\\'"], $s);
+    }
+
+    /** Minimal i18n labels for static UI. Extend as needed. */
+    private function i18n(string $lang): array
+    {
+        $map = [
+          'en' => [
+            'home'=>'Home','recent'=>'Recent','shop_now'=>'Shop Now',
+            'browse_recent'=>'Browse recent','recent_articles'=>'Recent articles',
+            'no_posts'=>'No posts yet. Come back soon.',
+            'previous'=>'Previous','next'=>'Next',
+            'faq'=>'FAQ','refs'=>'Referenced studies',
+            'disclaimer_short'=>'Educational content. Not medical advice.',
+            'disclaimer_full'=>'Educational content only; not medical advice',
+            'latest'=>'Latest','latest_aria'=>'Latest articles',
+          ],
+          'pl' => [
+            'home'=>'Strona główna','recent'=>'Najnowsze','shop_now'=>'Kup teraz',
+            'browse_recent'=>'Przeglądaj najnowsze','recent_articles'=>'Najnowsze artykuły',
+            'no_posts'=>'Brak wpisów. Wróć wkrótce.',
+            'previous'=>'Poprzednia','next'=>'Następna',
+            'faq'=>'FAQ','refs'=>'Badania (PMID)',
+            'disclaimer_short'=>'Treści edukacyjne. To nie jest porada medyczna.',
+            'disclaimer_full'=>'Treści edukacyjne; nie stanowią porady medycznej',
+            'latest'=>'Najnowsze','latest_aria'=>'Najnowsze artykuły',
+          ],
+          'de' => [
+            'home'=>'Startseite','recent'=>'Neueste','shop_now'=>'Jetzt kaufen',
+            'browse_recent'=>'Neueste ansehen','recent_articles'=>'Neueste Artikel',
+            'no_posts'=>'Noch keine Beiträge. Schau bald wieder vorbei.',
+            'previous'=>'Zurück','next'=>'Weiter',
+            'faq'=>'FAQ','refs'=>'Zitierte Studien',
+            'disclaimer_short'=>'Bildungsinhalte. Keine medizinische Beratung.',
+            'disclaimer_full'=>'Nur Bildungsinhalte; keine medizinische Beratung',
+            'latest'=>'Aktuell','latest_aria'=>'Neueste Artikel',
+          ],
+          'fr' => [
+            'home'=>'Accueil','recent'=>'Récents','shop_now'=>'Acheter',
+            'browse_recent'=>'Parcourir les récents','recent_articles'=>'Articles récents',
+            'no_posts'=>'Aucun article pour le moment. Revenez bientôt.',
+            'previous'=>'Précédent','next'=>'Suivant',
+            'faq'=>'FAQ','refs'=>'Études référencées',
+            'disclaimer_short'=>'Contenu éducatif. Pas un avis médical.',
+            'disclaimer_full'=>'Contenu éducatif uniquement ; pas un avis médical',
+            'latest'=>'Derniers','latest_aria'=>'Derniers articles',
+          ],
+          'it' => [
+            'home'=>'Home','recent'=>'Recenti','shop_now'=>'Acquista ora',
+            'browse_recent'=>'Sfoglia i recenti','recent_articles'=>'Articoli recenti',
+            'no_posts'=>'Nessun articolo ancora. Torna presto.',
+            'previous'=>'Precedente','next'=>'Successiva',
+            'faq'=>'FAQ','refs'=>'Studi citati',
+            'disclaimer_short'=>'Contenuti educativi. Non è un consiglio medico.',
+            'disclaimer_full'=>'Solo contenuti educativi; non costituisce consiglio medico',
+            'latest'=>'Ultimi','latest_aria'=>'Ultimi articoli',
+          ],
+          'es' => [
+            'home'=>'Inicio','recent'=>'Recientes','shop_now'=>'Comprar ahora',
+            'browse_recent'=>'Ver recientes','recent_articles'=>'Artículos recientes',
+            'no_posts'=>'Aún no hay publicaciones. Vuelve pronto.',
+            'previous'=>'Anterior','next'=>'Siguiente',
+            'faq'=>'FAQ','refs'=>'Estudios citados',
+            'disclaimer_short'=>'Contenido educativo. No es asesoramiento médico.',
+            'disclaimer_full'=>'Contenido educativo; no constituye asesoramiento médico',
+            'latest'=>'Últimos','latest_aria'=>'Artículos recientes',
+          ],
+          'sv' => [
+            'home'=>'Hem','recent'=>'Senaste','shop_now'=>'Köp nu',
+            'browse_recent'=>'Bläddra bland senaste','recent_articles'=>'Senaste artiklar',
+            'no_posts'=>'Inga inlägg ännu. Titta snart igen.',
+            'previous'=>'Föregående','next'=>'Nästa',
+            'faq'=>'FAQ','refs'=>'Refererade studier',
+            'disclaimer_short'=>'Utbildande innehåll. Ej medicinsk rådgivning.',
+            'disclaimer_full'=>'Endast utbildande innehåll; ingen medicinsk rådgivning',
+            'latest'=>'Senaste','latest_aria'=>'Senaste artiklar',
+          ],
+          'fi' => [
+            'home'=>'Etusivu','recent'=>'Uusimmat','shop_now'=>'Osta nyt',
+            'browse_recent'=>'Selaa uusimpia','recent_articles'=>'Uusimmat artikkelit',
+            'no_posts'=>'Ei vielä artikkeleita. Tule pian takaisin.',
+            'previous'=>'Edellinen','next'=>'Seuraava',
+            'faq'=>'UKK','refs'=>'Viitatut tutkimukset',
+            'disclaimer_short'=>'Koulutuksellista sisältöä. Ei lääketieteellistä neuvontaa.',
+            'disclaimer_full'=>'Vain koulutuksellista sisältöä; ei lääketieteellistä neuvontaa',
+            'latest'=>'Uusimmat','latest_aria'=>'Uusimmat artikkelit',
+          ],
+          'nl' => [
+            'home'=>'Home','recent'=>'Recent','shop_now'=>'Nu kopen',
+            'browse_recent'=>'Blader recente','recent_articles'=>'Recente artikelen',
+            'no_posts'=>'Nog geen berichten. Kom snel terug.',
+            'previous'=>'Vorige','next'=>'Volgende',
+            'faq'=>'FAQ','refs'=>'Gerefereerde studies',
+            'disclaimer_short'=>'Educatieve inhoud. Geen medisch advies.',
+            'disclaimer_full'=>'Alleen educatieve inhoud; geen medisch advies',
+            'latest'=>'Laatste','latest_aria'=>'Laatste artikelen',
+          ],
+          'cs' => [
+            'home'=>'Domů','recent'=>'Nejnovější','shop_now'=>'Koupit nyní',
+            'browse_recent'=>'Procházet nejnovější','recent_articles'=>'Nejnovější články',
+            'no_posts'=>'Zatím žádné příspěvky. Brzy se vraťte.',
+            'previous'=>'Předchozí','next'=>'Další',
+            'faq'=>'FAQ','refs'=>'Citované studie',
+            'disclaimer_short'=>'Vzdělávací obsah. Nejde o lékařskou radu.',
+            'disclaimer_full'=>'Pouze vzdělávací obsah; nejedná se o lékařskou radu',
+            'latest'=>'Nejnovější','latest_aria'=>'Nejnovější články',
+          ],
+        ];
+        return $map[$lang] ?? $map['en'];
     }
 }
