@@ -247,25 +247,24 @@ HTML : '';
 \$shop = \$config['shop_url']  ?? 'https://camelway.eu/';
 \$base = \$config['base_url']  ?? '/';
 
-/* Where is data? Allow settings.php override via 'data_dir'. */
-\$dataOverride = isset(\$config['data_dir']) && is_string(\$config['data_dir']) && \$config['data_dir'] !== '' ? rtrim(\$config['data_dir'], '/')
-              : null;
-
-/* Robust latest posts loader (works with multiple layouts & overrides) */
+/* Resolve data location: config override, env(DATA_DIR), project-relative, hard fallback */
 \$latest = [];
-\$root1  = realpath(dirname(__DIR__, 2)); // project root
-\$candidates = [];
-if (\$dataOverride) {
-    \$candidates[] = \$dataOverride . '/posts.json';
-}
-if (\$root1) {
-    \$candidates[] = \$root1 . '/data/posts.json';        // current location
-    \$candidates[] = \$root1 . '/data/posts/posts.json';  // legacy placeholder path
-}
+\$envData      = getenv('DATA_DIR') ?: null;
+\$dataOverride = (isset(\$config['data_dir']) && is_string(\$config['data_dir']) && \$config['data_dir'] !== '')
+  ? rtrim(\$config['data_dir'], '/')
+  : null;
+\$projectRoot  = rtrim(dirname(__DIR__, 2), '/');
+
+\$indexCandidates = [];
+if (\$dataOverride) \$indexCandidates[] = \$dataOverride . '/posts.json';
+if (\$envData)      \$indexCandidates[] = rtrim(\$envData, '/') . '/posts.json';
+\$indexCandidates[] = \$projectRoot . '/data/posts.json';
+\$indexCandidates[] = __DIR__ . '/../../data/posts.json';
+
 \$found = false;
-foreach (\$candidates as \$c) {
+foreach (array_unique(\$indexCandidates) as \$c) {
     if (is_file(\$c)) {
-        \$j = json_decode((string)file_get_contents(\$c), true);
+        \$j = json_decode((string)@file_get_contents(\$c), true);
         if (is_array(\$j) && !empty(\$j['posts']) && is_array(\$j['posts'])) {
             \$latest = array_slice(\$j['posts'], 0, 10);
             \$found = true;
@@ -276,12 +275,15 @@ foreach (\$candidates as \$c) {
 if (!\$found) {
     \$dirs = [];
     if (\$dataOverride) \$dirs[] = \$dataOverride . '/posts';
-    if (\$root1)        \$dirs[] = \$root1 . '/data/posts';
-    foreach (\$dirs as \$dir) {
+    if (\$envData)      \$dirs[] = rtrim(\$envData, '/') . '/posts';
+    \$dirs[] = \$projectRoot . '/data/posts';
+    \$dirs[] = __DIR__ . '/../../data/posts';
+
+    foreach (array_unique(\$dirs) as \$dir) {
         if (is_dir(\$dir)) {
             \$tmp = [];
-            foreach (glob(\$dir.'/*.json') as \$f) {
-                \$x = json_decode((string)file_get_contents(\$f), true);
+            foreach (glob(\$dir.'/*.json') ?: [] as \$f) {
+                \$x = json_decode((string)@file_get_contents(\$f), true);
                 if (!is_array(\$x)) continue;
                 \$tmp[] = [
                     'title' => (string)(\$x['title'] ?? basename(\$f, '.json')),
@@ -312,7 +314,7 @@ PHP;
 
     private function ctaPhp(string $pre, array $copy, string $L_shop): string
     {
-        // Title/copy now configurable via settings.php; safe fallbacks remain.
+        // Title/copy configurable via settings.php; safe fallbacks remain.
         return <<<PHP
 <?php /** @var array \$config */ \$shop = \$config['shop_url'] ?? 'https://camelway.eu/'; ?>
 <section class="$pre-cta">
@@ -362,25 +364,24 @@ PHP;
 if (\$perPage <= 0) \$perPage = 20; // safety
 \$page    = max(1, (int)(\$_GET['page'] ?? 1));
 
-/* Where is data? Allow settings.php override via 'data_dir'. */
-\$dataOverride = isset(\$config['data_dir']) && is_string(\$config['data_dir']) && \$config['data_dir'] !== '' ? rtrim(\$config['data_dir'], '/')
-              : null;
+/* Resolve data location: config override, env(DATA_DIR), project-relative, hard fallback */
+\$envData      = getenv('DATA_DIR') ?: null;
+\$dataOverride = (isset(\$config['data_dir']) && is_string(\$config['data_dir']) && \$config['data_dir'] !== '')
+  ? rtrim(\$config['data_dir'], '/')
+  : null;
+\$projectRoot  = rtrim(dirname(__DIR__, 2), '/');
 
-/* Robust posts index loader (supports overrides; scans as fallback) */
+/* Load posts index if available; else scan post files */
 \$all = [];
-\$root1  = realpath(dirname(__DIR__, 2)); // project root
-\$candidates = [];
-if (\$dataOverride) {
-  \$candidates[] = \$dataOverride . '/posts.json';
-}
-if (\$root1) {
-  \$candidates[] = \$root1 . '/data/posts.json';
-  \$candidates[] = \$root1 . '/data/posts/posts.json';
-}
+\$indexCandidates = [];
+if (\$dataOverride) \$indexCandidates[] = \$dataOverride . '/posts.json';
+if (\$envData)      \$indexCandidates[] = rtrim(\$envData, '/') . '/posts.json';
+\$indexCandidates[] = \$projectRoot . '/data/posts.json';
+\$indexCandidates[] = __DIR__ . '/../../data/posts.json';
 
-foreach (\$candidates as \$c) {
+foreach (\$indexCandidates as \$c) {
   if (is_file(\$c)) {
-    \$j = json_decode((string)file_get_contents(\$c), true);
+    \$j = json_decode((string)@file_get_contents(\$c), true);
     if (is_array(\$j) && !empty(\$j['posts']) && is_array(\$j['posts'])) {
       \$all = \$j['posts'];
       break;
@@ -391,12 +392,14 @@ if (!\$all) {
   // Final fallback: scan post files and build a minimal index
   \$dirs = [];
   if (\$dataOverride) \$dirs[] = \$dataOverride . '/posts';
-  if (\$root1)        \$dirs[] = \$root1 . '/data/posts';
-  foreach (\$dirs as \$dir) {
+  if (\$envData)      \$dirs[] = rtrim(\$envData, '/') . '/posts';
+  \$dirs[] = \$projectRoot . '/data/posts';
+  \$dirs[] = __DIR__ . '/../../data/posts';
+  foreach (array_unique(\$dirs) as \$dir) {
     if (is_dir(\$dir)) {
       \$tmp = [];
-      foreach (glob(\$dir.'/*.json') as \$f) {
-        \$x = json_decode((string)file_get_contents(\$f), true);
+      foreach (glob(\$dir.'/*.json') ?: [] as \$f) {
+        \$x = json_decode((string)@file_get_contents(\$f), true);
         if (!is_array(\$x)) continue;
         \$tmp[] = [
           'title'        => (string)(\$x['title'] ?? basename(\$f, '.json')),
