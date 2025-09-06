@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Quick LEMP + auto-gpt-blog installer for Ubuntu 24.04
-# Usage: sudo bash install_sattelite_site.sh <linux_user> <domain> <lang>
-# Example: sudo bash install_sattelite_site.sh camelmilk1 camel-milk.co.uk en
+# Usage: sudo bash install_camelsite.sh <linux_user> <domain> <lang>
+# Example: sudo bash install_camelsite.sh camelmilk1 camel-milk.co.uk en
 
 set -euo pipefail
 
@@ -69,17 +69,23 @@ else
   sudo -u "${SYSUSER}" -H bash -lc "cd ~/auto-gpt-blog && git pull --ff-only || true"
 fi
 
-# Ensure storage dirs are writable by php-fpm (group)
-mkdir -p "${APP_DIR}/storage/cache" "${APP_DIR}/storage/logs"
+# Ensure storage + data dirs are writable by php-fpm (group)
+mkdir -p "${APP_DIR}/storage/cache" "${APP_DIR}/storage/logs" "${APP_DIR}/data/posts"
 chown -R "${SYSUSER}:www-data" "${APP_DIR}"
 find "${APP_DIR}/storage" -type d -exec chmod 2775 {} \; || true
 find "${APP_DIR}/storage" -type f -exec chmod 664 {} \; || true
+find "${APP_DIR}/data" -type d -exec chmod 2775 {} \; || true
+# If posts.json already exists, keep it; otherwise create an empty index with group-writable perms
+if [[ ! -f "${APP_DIR}/data/posts.json" ]]; then
+  echo '{"posts":[]}' > "${APP_DIR}/data/posts.json"
+fi
+chmod 664 "${APP_DIR}/data/posts.json" || true
 
 echo "==> configure .env…"
 if [[ ! -f "${ENV_FILE}" && -f "${ENV_EXAMPLE}" ]]; then cp "${ENV_EXAMPLE}" "${ENV_FILE}"; fi
 
 # Set required envs
-sed -i "s|^FEED_BASE_URL=.*|FEED_BASE_URL=https://feed.camelway.eu|g" "${ENV_FILE}" || true
+sed -i "s|^FEED_BASE_URL=.*|FEED_BASE_URL=https://mysite.com|g" "${ENV_FILE}" || true
 if grep -q "^FEED_API_KEY=" "${ENV_FILE}"; then
   sed -i "s|^FEED_API_KEY=.*|FEED_API_KEY=${API_KEY}|g" "${ENV_FILE}"
 else
@@ -273,5 +279,67 @@ find "${APP_DIR}" -type d -exec chmod 0755 {} \;
 find "${APP_DIR}" -type f -exec chmod 0644 {} \;
 find "${APP_DIR}/storage" -type d -exec chmod 2775 {} \; 2>/dev/null || true
 find "${APP_DIR}/storage" -type f -exec chmod 0664 {} \; 2>/dev/null || true
+chmod -R +x ${APP_DIR}/bin
+
+# -------------------------
+# systemd service + timers
+# -------------------------
+echo "==> install systemd service + two randomized timers (AM/PM)…"
+
+# Create a safe identifier using username + domain (normalized)
+CANON_SAFE="$(echo "${CANON,,}" | sed -E 's/[^a-z0-9]+/-/g; s/^-+|-+$//g')"
+UNIT_BASE="auto-gpt-blog-article-${SYSUSER}-${CANON_SAFE}"
+
+SERVICE_PATH="/etc/systemd/system/${UNIT_BASE}.service"
+TIMER_AM_PATH="/etc/systemd/system/${UNIT_BASE}-am.timer"
+TIMER_PM_PATH="/etc/systemd/system/${UNIT_BASE}-pm.timer"
+
+cat > "${SERVICE_PATH}" <<UNIT
+[Unit]
+Description=Generate one article for ${CANON} (auto-gpt-blog) and rebuild/ping
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=${SYSUSER}
+WorkingDirectory=${APP_DIR}
+Environment=WEB_GROUP=www-data
+ExecStart=/usr/bin/php ${APP_DIR}/bin/article-generate
+UNIT
+
+cat > "${TIMER_AM_PATH}" <<UNIT
+[Unit]
+Description=Random morning article generation for ${CANON} (00:00–12:00)
+
+[Timer]
+OnCalendar=*-*-* 00:00
+RandomizedDelaySec=12h
+Persistent=true
+Unit=${UNIT_BASE}.service
+
+[Install]
+WantedBy=timers.target
+UNIT
+
+cat > "${TIMER_PM_PATH}" <<UNIT
+[Unit]
+Description=Random afternoon article generation for ${CANON} (12:00–24:00)
+
+[Timer]
+OnCalendar=*-*-* 12:00
+RandomizedDelaySec=12h
+Persistent=true
+Unit=${UNIT_BASE}.service
+
+[Install]
+WantedBy=timers.target
+UNIT
+
+systemctl daemon-reload
+systemctl enable --now "${UNIT_BASE}-am.timer" "${UNIT_BASE}-pm.timer"
+
+echo "==> timers active (next runs shown):"
+systemctl list-timers | grep "${UNIT_BASE}" || true
 
 echo "==> done. Visit: https://${CANON}"
