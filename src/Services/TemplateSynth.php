@@ -226,8 +226,8 @@ CSS;
     }
 
     private function headerPhp(string $pre, array $l, array $Le): string
-    {
-        $rail = $l['header_variant'] === 'rail' ? <<<HTML
+{
+    $rail = $l['header_variant'] === 'rail' ? <<<HTML
   <?php if (\$latest): ?>
   <div class="$pre-header-rail" aria-label="{$Le['latest_aria']}">
     <span class="$pre-rail-label">{$Le['latest']}:</span>
@@ -240,7 +240,7 @@ CSS;
   <?php endif; ?>
 HTML : '';
 
-        return <<<PHP
+    return <<<PHP
 <?php
 /** @var array \$config */
 \$site = \$config['site_name'] ?? 'CamelWay';
@@ -256,7 +256,6 @@ if (!function_exists('cw_locate_data_bases')) {
         \$projectRoot = rtrim(dirname(__DIR__, 2), '/');
         \$bases[] = \$projectRoot . '/data';
         \$bases[] = __DIR__ . '/../../data';
-        // de-dup + keep order
         return array_values(array_unique(\$bases));
     }
     function cw_read_json_assoc(string \$file) {
@@ -266,21 +265,27 @@ if (!function_exists('cw_locate_data_bases')) {
         return (json_last_error() === JSON_ERROR_NONE) ? \$j : null;
     }
     function cw_parse_front_matter(string \$md): array {
-        // very small YAML-ish parser for keys: title, summary, tags, date/published_at
+        // Minimal YAML-ish parser; avoids fragile escape sequences.
         \$out = [];
-        if (strncmp(\$md, \"---\\n\", 4) === 0) {
-            \$end = strpos(\$md, \"\\n---\", 4);
+        if (substr(\$md, 0, 4) === "---\\n") {
+            \$end = strpos(\$md, "\\n---", 4);
             if (\$end !== false) {
-                \$yaml = substr(\$md, 4, \$end-4);
+                \$yaml = substr(\$md, 4, \$end - 4);
                 foreach (preg_split('/\\r?\\n/', \$yaml) as \$line) {
-                    if (!strpos(\$line, ':')) continue;
-                    [\$k, \$v] = array_map('trim', explode(':', \$line, 2));
-                    if (\$k === 'title' || \$k === 'summary' || \$k === 'published_at' || \$k === 'date') {
-                        \$out[\$k] = trim(\$v, \" \\\"'\");
+                    \$pos = strpos(\$line, ':');
+                    if (\$pos === false) continue;
+                    \$k = trim(substr(\$line, 0, \$pos));
+                    \$v = trim(substr(\$line, \$pos + 1));
+                    // strip optional surrounding quotes
+                    \$v = preg_replace('/^\\s*[\"\\\']?(.*?)[\"\\\']?\\s*$/', '\$1', \$v);
+
+                    if (in_array(\$k, ['title','summary','published_at','date'], true)) {
+                        \$out[\$k] = \$v;
                     } elseif (\$k === 'tags') {
-                        // tags: [a,b] or a,b
+                        // tags: [a, b] or a,b
                         if (preg_match('/\\[(.*)\\]/', \$v, \$m)) { \$v = \$m[1]; }
-                        \$out['tags'] = array_values(array_filter(array_map('trim', preg_split('/\\s*,\\s*/', \$v))));
+                        \$parts = preg_split('/\\s*,\\s*/', \$v) ?: [];
+                        \$out['tags'] = array_values(array_filter(array_map('trim', \$parts)));
                     }
                 }
             }
@@ -289,8 +294,7 @@ if (!function_exists('cw_locate_data_bases')) {
     }
     function cw_standardize_post(array \$x, string \$fallbackSlug, int \$mtime): array {
         \$slug = (string) (\$x['slug'] ?? \$fallbackSlug);
-        // ensure slug has no extension and no leading slashes
-        \$slug = ltrim(preg_replace('/\\.[a-z0-9]+$/i','', \$slug), '/');
+        \$slug = ltrim(preg_replace('/\\.[a-z0-9]+$/i','', \$slug), '/'); // drop extension
         return [
             'title'        => (string)(\$x['title'] ?? \$slug),
             'slug'         => \$slug,
@@ -302,19 +306,17 @@ if (!function_exists('cw_locate_data_bases')) {
     function cw_posts_all(array \$config): array {
         \$bases = cw_locate_data_bases(\$config);
         \$checked = [];
-        // 1) Try indexes in each base
+        // 1) Try index files
         foreach (\$bases as \$base) {
             foreach (['posts.json','posts/posts.json','index.json','articles.json'] as \$idx) {
-                \$file = rtrim(\$base,'/') . '/' . \$idx;
-                \$checked[] = \$file;
+                \$file = rtrim(\$base,'/') . '/' . \$idx; \$checked[] = \$file;
                 if (is_file(\$file)) {
                     \$j = cw_read_json_assoc(\$file);
                     if (!is_array(\$j)) continue;
-                    // accept multiple shapes
-                    if (isset(\$j['posts']) && is_array(\$j['posts'])) { \$arr = \$j['posts']; }
-                    elseif (isset(\$j['items']) && is_array(\$j['items'])) { \$arr = \$j['items']; }
+                    if (isset(\$j['posts'])    && is_array(\$j['posts']))    { \$arr = \$j['posts']; }
+                    elseif (isset(\$j['items'])    && is_array(\$j['items']))    { \$arr = \$j['items']; }
                     elseif (isset(\$j['articles']) && is_array(\$j['articles'])) { \$arr = \$j['articles']; }
-                    elseif (array_keys(\$j) === range(0, count(\$j)-1)) { \$arr = \$j; } // plain array
+                    elseif (array_keys(\$j) === range(0, max(0, count(\$j)-1)))  { \$arr = \$j; } // plain array
                     else { continue; }
 
                     \$out = [];
@@ -330,11 +332,10 @@ if (!function_exists('cw_locate_data_bases')) {
                 }
             }
         }
-        // 2) Fallback: scan posts directory for JSON and MD
+        // 2) Fallback: scan directories for JSON/MD
         foreach (\$bases as \$base) {
             foreach (['posts','articles','content/posts','content'] as \$dirRel) {
-                \$dir = rtrim(\$base,'/') . '/' . \$dirRel;
-                \$checked[] = \$dir;
+                \$dir = rtrim(\$base,'/') . '/' . \$dirRel; \$checked[] = \$dir;
                 if (!is_dir(\$dir)) continue;
                 \$tmp = [];
                 \$files = array_merge(glob(\$dir.'/*.json') ?: [], glob(\$dir.'/*.md') ?: []);
@@ -356,7 +357,6 @@ if (!function_exists('cw_locate_data_bases')) {
                 }
             }
         }
-        // If still nothing, log once with what we checked
         if (!empty(\$checked)) {
             @error_log('TemplateSynth: no posts found. Checked: '.implode(', ', \$checked));
         }
@@ -379,7 +379,7 @@ if (!function_exists('cw_locate_data_bases')) {
   {$rail}
 </header>
 PHP;
-    }
+}
 
     private function ctaPhp(string $pre, array $copy, string $L_shop): string
     {
