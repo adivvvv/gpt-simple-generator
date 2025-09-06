@@ -247,56 +247,125 @@ HTML : '';
 \$shop = \$config['shop_url']  ?? 'https://camelway.eu/';
 \$base = \$config['base_url']  ?? '/';
 
-/* Resolve data location: config override, env(DATA_DIR), project-relative, hard fallback */
-\$latest = [];
-\$envData      = getenv('DATA_DIR') ?: null;
-\$dataOverride = (isset(\$config['data_dir']) && is_string(\$config['data_dir']) && \$config['data_dir'] !== '')
-  ? rtrim(\$config['data_dir'], '/')
-  : null;
-\$projectRoot  = rtrim(dirname(__DIR__, 2), '/');
-
-\$indexCandidates = [];
-if (\$dataOverride) \$indexCandidates[] = \$dataOverride . '/posts.json';
-if (\$envData)      \$indexCandidates[] = rtrim(\$envData, '/') . '/posts.json';
-\$indexCandidates[] = \$projectRoot . '/data/posts.json';
-\$indexCandidates[] = __DIR__ . '/../../data/posts.json';
-
-\$found = false;
-foreach (array_unique(\$indexCandidates) as \$c) {
-    if (is_file(\$c)) {
-        \$j = json_decode((string)@file_get_contents(\$c), true);
-        if (is_array(\$j) && !empty(\$j['posts']) && is_array(\$j['posts'])) {
-            \$latest = array_slice(\$j['posts'], 0, 10);
-            \$found = true;
-            break;
-        }
+/* ---------- Robust posts loader (shared by header + home) ---------- */
+if (!function_exists('cw_locate_data_bases')) {
+    function cw_locate_data_bases(array \$config): array {
+        \$bases = [];
+        if (!empty(\$config['data_dir']) && is_string(\$config['data_dir'])) { \$bases[] = rtrim(\$config['data_dir'], '/'); }
+        \$env = getenv('DATA_DIR'); if (\$env) { \$bases[] = rtrim(\$env, '/'); }
+        \$projectRoot = rtrim(dirname(__DIR__, 2), '/');
+        \$bases[] = \$projectRoot . '/data';
+        \$bases[] = __DIR__ . '/../../data';
+        // de-dup + keep order
+        return array_values(array_unique(\$bases));
     }
-}
-if (!\$found) {
-    \$dirs = [];
-    if (\$dataOverride) \$dirs[] = \$dataOverride . '/posts';
-    if (\$envData)      \$dirs[] = rtrim(\$envData, '/') . '/posts';
-    \$dirs[] = \$projectRoot . '/data/posts';
-    \$dirs[] = __DIR__ . '/../../data/posts';
-
-    foreach (array_unique(\$dirs) as \$dir) {
-        if (is_dir(\$dir)) {
-            \$tmp = [];
-            foreach (glob(\$dir.'/*.json') ?: [] as \$f) {
-                \$x = json_decode((string)@file_get_contents(\$f), true);
-                if (!is_array(\$x)) continue;
-                \$tmp[] = [
-                    'title' => (string)(\$x['title'] ?? basename(\$f, '.json')),
-                    'slug'  => (string)(\$x['slug']  ?? basename(\$f, '.json')),
-                ];
-            }
-            if (\$tmp) {
-                \$latest = array_slice(\$tmp, 0, 10);
-                break;
+    function cw_read_json_assoc(string \$file) {
+        \$raw = @file_get_contents(\$file);
+        if (\$raw === false) return null;
+        \$j = json_decode(\$raw, true);
+        return (json_last_error() === JSON_ERROR_NONE) ? \$j : null;
+    }
+    function cw_parse_front_matter(string \$md): array {
+        // very small YAML-ish parser for keys: title, summary, tags, date/published_at
+        \$out = [];
+        if (strncmp(\$md, \"---\\n\", 4) === 0) {
+            \$end = strpos(\$md, \"\\n---\", 4);
+            if (\$end !== false) {
+                \$yaml = substr(\$md, 4, \$end-4);
+                foreach (preg_split('/\\r?\\n/', \$yaml) as \$line) {
+                    if (!strpos(\$line, ':')) continue;
+                    [\$k, \$v] = array_map('trim', explode(':', \$line, 2));
+                    if (\$k === 'title' || \$k === 'summary' || \$k === 'published_at' || \$k === 'date') {
+                        \$out[\$k] = trim(\$v, \" \\\"'\");
+                    } elseif (\$k === 'tags') {
+                        // tags: [a,b] or a,b
+                        if (preg_match('/\\[(.*)\\]/', \$v, \$m)) { \$v = \$m[1]; }
+                        \$out['tags'] = array_values(array_filter(array_map('trim', preg_split('/\\s*,\\s*/', \$v))));
+                    }
+                }
             }
         }
+        return \$out;
+    }
+    function cw_standardize_post(array \$x, string \$fallbackSlug, int \$mtime): array {
+        \$slug = (string) (\$x['slug'] ?? \$fallbackSlug);
+        // ensure slug has no extension and no leading slashes
+        \$slug = ltrim(preg_replace('/\\.[a-z0-9]+$/i','', \$slug), '/');
+        return [
+            'title'        => (string)(\$x['title'] ?? \$slug),
+            'slug'         => \$slug,
+            'summary'      => (string)(\$x['summary'] ?? ''),
+            'tags'         => (array) (\$x['tags'] ?? []),
+            'published_at' => (string)(\$x['published_at'] ?? (\$x['date'] ?? date('Y-m-d', \$mtime ?: time()))),
+        ];
+    }
+    function cw_posts_all(array \$config): array {
+        \$bases = cw_locate_data_bases(\$config);
+        \$checked = [];
+        // 1) Try indexes in each base
+        foreach (\$bases as \$base) {
+            foreach (['posts.json','posts/posts.json','index.json','articles.json'] as \$idx) {
+                \$file = rtrim(\$base,'/') . '/' . \$idx;
+                \$checked[] = \$file;
+                if (is_file(\$file)) {
+                    \$j = cw_read_json_assoc(\$file);
+                    if (!is_array(\$j)) continue;
+                    // accept multiple shapes
+                    if (isset(\$j['posts']) && is_array(\$j['posts'])) { \$arr = \$j['posts']; }
+                    elseif (isset(\$j['items']) && is_array(\$j['items'])) { \$arr = \$j['items']; }
+                    elseif (isset(\$j['articles']) && is_array(\$j['articles'])) { \$arr = \$j['articles']; }
+                    elseif (array_keys(\$j) === range(0, count(\$j)-1)) { \$arr = \$j; } // plain array
+                    else { continue; }
+
+                    \$out = [];
+                    foreach (\$arr as \$row) {
+                        if (!is_array(\$row)) continue;
+                        \$fileSlug = (string) (\$row['slug'] ?? '');
+                        \$out[] = cw_standardize_post(\$row, \$fileSlug !== '' ? \$fileSlug : 'post-'.(count(\$out)+1), @filemtime(\$file));
+                    }
+                    if (\$out) {
+                        usort(\$out, fn(\$a,\$b)=> strcmp((\$b['published_at'] ?? '').(\$b['slug'] ?? ''), (\$a['published_at'] ?? '').(\$a['slug'] ?? '')));
+                        return \$out;
+                    }
+                }
+            }
+        }
+        // 2) Fallback: scan posts directory for JSON and MD
+        foreach (\$bases as \$base) {
+            foreach (['posts','articles','content/posts','content'] as \$dirRel) {
+                \$dir = rtrim(\$base,'/') . '/' . \$dirRel;
+                \$checked[] = \$dir;
+                if (!is_dir(\$dir)) continue;
+                \$tmp = [];
+                \$files = array_merge(glob(\$dir.'/*.json') ?: [], glob(\$dir.'/*.md') ?: []);
+                foreach (\$files as \$f) {
+                    \$mtime = @filemtime(\$f) ?: time();
+                    if (substr(\$f,-3) === '.md') {
+                        \$md = (string) @file_get_contents(\$f);
+                        \$meta = cw_parse_front_matter(\$md);
+                        \$tmp[] = cw_standardize_post(\$meta, basename(\$f, '.md'), \$mtime);
+                    } else {
+                        \$x = cw_read_json_assoc(\$f);
+                        if (!is_array(\$x)) continue;
+                        \$tmp[] = cw_standardize_post(\$x, basename(\$f, '.json'), \$mtime);
+                    }
+                }
+                if (\$tmp) {
+                    usort(\$tmp, fn(\$a,\$b)=> strcmp((\$b['published_at'] ?? '').(\$b['slug'] ?? ''), (\$a['published_at'] ?? '').(\$a['slug'] ?? '')));
+                    return \$tmp;
+                }
+            }
+        }
+        // If still nothing, log once with what we checked
+        if (!empty(\$checked)) {
+            @error_log('TemplateSynth: no posts found. Checked: '.implode(', ', \$checked));
+        }
+        return [];
     }
 }
+
+/* Build 'latest' preview safely */
+\$latest = array_slice(cw_posts_all(\$config), 0, 10);
 ?>
 <header class="$pre-header">
   <div class="$pre-container $pre-header-bar">
@@ -314,7 +383,7 @@ PHP;
 
     private function ctaPhp(string $pre, array $copy, string $L_shop): string
     {
-        // Title/copy configurable via settings.php; safe fallbacks remain.
+        // Title/copy now configurable via settings.php; safe fallbacks remain.
         return <<<PHP
 <?php /** @var array \$config */ \$shop = \$config['shop_url'] ?? 'https://camelway.eu/'; ?>
 <section class="$pre-cta">
@@ -359,77 +428,23 @@ PHP;
 <?php require __DIR__.'/partial-icons.php'; require __DIR__.'/partial-header.php';
 /** @var array \$config */
 
-/** Pagination + posts */
+/** Pagination + posts (using the shared loader from partial-header.php) */
 \$perPage = (int)(\$config['posts_per_page'] ?? 20);
-if (\$perPage <= 0) \$perPage = 20; // safety
-\$page    = max(1, (int)(\$_GET['page'] ?? 1));
+if (\$perPage <= 0) \$perPage = 20;
+\$page = max(1, (int)(\$_GET['page'] ?? 1));
 
-/* Resolve data location: config override, env(DATA_DIR), project-relative, hard fallback */
-\$envData      = getenv('DATA_DIR') ?: null;
-\$dataOverride = (isset(\$config['data_dir']) && is_string(\$config['data_dir']) && \$config['data_dir'] !== '')
-  ? rtrim(\$config['data_dir'], '/')
-  : null;
-\$projectRoot  = rtrim(dirname(__DIR__, 2), '/');
-
-/* Load posts index if available; else scan post files */
-\$all = [];
-\$indexCandidates = [];
-if (\$dataOverride) \$indexCandidates[] = \$dataOverride . '/posts.json';
-if (\$envData)      \$indexCandidates[] = rtrim(\$envData, '/') . '/posts.json';
-\$indexCandidates[] = \$projectRoot . '/data/posts.json';
-\$indexCandidates[] = __DIR__ . '/../../data/posts.json';
-
-foreach (\$indexCandidates as \$c) {
-  if (is_file(\$c)) {
-    \$j = json_decode((string)@file_get_contents(\$c), true);
-    if (is_array(\$j) && !empty(\$j['posts']) && is_array(\$j['posts'])) {
-      \$all = \$j['posts'];
-      break;
-    }
-  }
-}
-if (!\$all) {
-  // Final fallback: scan post files and build a minimal index
-  \$dirs = [];
-  if (\$dataOverride) \$dirs[] = \$dataOverride . '/posts';
-  if (\$envData)      \$dirs[] = rtrim(\$envData, '/') . '/posts';
-  \$dirs[] = \$projectRoot . '/data/posts';
-  \$dirs[] = __DIR__ . '/../../data/posts';
-  foreach (array_unique(\$dirs) as \$dir) {
-    if (is_dir(\$dir)) {
-      \$tmp = [];
-      foreach (glob(\$dir.'/*.json') ?: [] as \$f) {
-        \$x = json_decode((string)@file_get_contents(\$f), true);
-        if (!is_array(\$x)) continue;
-        \$tmp[] = [
-          'title'        => (string)(\$x['title'] ?? basename(\$f, '.json')),
-          'slug'         => (string)(\$x['slug']  ?? basename(\$f, '.json')),
-          'summary'      => (string)(\$x['summary'] ?? ''),
-          'tags'         => (array) (\$x['tags'] ?? []),
-          'published_at' => (string)(\$x['published_at'] ?? date('Y-m-d', @filemtime(\$f) ?: time())),
-        ];
-      }
-      if (\$tmp) {
-        usort(\$tmp, fn(\$a,\$b) => strcmp((\$b['published_at'] ?? '').(\$b['slug'] ?? ''), (\$a['published_at'] ?? '').(\$a['slug'] ?? '')));
-        \$all = \$tmp;
-        break;
-      }
-    }
-  }
-}
-
+\$all = function_exists('cw_posts_all') ? cw_posts_all(\$config) : [];
 \$total = count(\$all);
 \$start = (\$page - 1) * \$perPage;
 \$posts = array_slice(\$all, \$start, \$perPage);
 \$totalPages = max(1, (int)ceil(max(1, \$total) / \$perPage));
 
-/** Build a page link */
 \$pagelink = fn (int \$p): string => '?page=' . max(1, \$p) . '#recent';
 \$rssHref  = (\$config['base_url'] ?? '').'/rss.xml';
 \$atomHref = (\$config['base_url'] ?? '').'/atom.xml';
 \$cssver   = @filemtime(__DIR__ . '/../../public/assets/tailwind.css') ?: time();
 
-/** JSON-LD for homepage: WebSite + ItemList (latest 20) */
+/** JSON-LD: WebSite + ItemList (latest 20) */
 \$siteJsonLd = [
   '@context' => 'https://schema.org',
   '@type'    => 'WebSite',
@@ -748,7 +763,7 @@ PHP;
             'faq'=>'UKK','refs'=>'Viitatut tutkimukset',
             'disclaimer_short'=>'Koulutuksellista sisältöä. Ei lääketieteellistä neuvontaa.',
             'disclaimer_full'=>'Vain koulutuksellista sisältöä; ei lääketieteellistä neuvontaa',
-            'latest'=>'Uusimmat','latest_aria'=>'Uusimmat artikkelit',
+            'latest'=>'Uusimmat','latest_aria'=>'Uusimmat artiklar',
           ],
           'nl' => [
             'home'=>'Home','recent'=>'Recent','shop_now'=>'Nu kopen',
