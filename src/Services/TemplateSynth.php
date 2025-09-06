@@ -247,7 +247,7 @@ HTML : '';
 \$shop = \$config['shop_url']  ?? 'https://camelway.eu/';
 \$base = \$config['base_url']  ?? '/';
 
-/* ---------- Robust posts loader (shared by header + home) ---------- */
+/* ---------- Robust posts loader (JSON-only; shared by header + home) ---------- */
 if (!function_exists('cw_locate_data_bases')) {
     function cw_locate_data_bases(array \$config): array {
         \$bases = [];
@@ -264,33 +264,9 @@ if (!function_exists('cw_locate_data_bases')) {
         \$j = json_decode(\$raw, true);
         return (json_last_error() === JSON_ERROR_NONE) ? \$j : null;
     }
-    function cw_parse_front_matter(string \$md): array {
-        // Minimal YAML-ish parser; avoids fragile escape sequences.
-        \$out = [];
-        if (substr(\$md, 0, 4) === "---\\n") {
-            \$end = strpos(\$md, "\\n---", 4);
-            if (\$end !== false) {
-                \$yaml = substr(\$md, 4, \$end - 4);
-                foreach (preg_split('/\\r?\\n/', \$yaml) as \$line) {
-                    \$pos = strpos(\$line, ':');
-                    if (\$pos === false) continue;
-                    \$k = trim(substr(\$line, 0, \$pos));
-                    \$v = trim(substr(\$line, \$pos + 1));
-                    // strip optional surrounding quotes
-                    \$v = preg_replace('/^\\s*[\"\\\']?(.*?)[\"\\\']?\\s*$/', '\$1', \$v);
-
-                    if (in_array(\$k, ['title','summary','published_at','date'], true)) {
-                        \$out[\$k] = \$v;
-                    } elseif (\$k === 'tags') {
-                        // tags: [a, b] or a,b
-                        if (preg_match('/\\[(.*)\\]/', \$v, \$m)) { \$v = \$m[1]; }
-                        \$parts = preg_split('/\\s*,\\s*/', \$v) ?: [];
-                        \$out['tags'] = array_values(array_filter(array_map('trim', \$parts)));
-                    }
-                }
-            }
-        }
-        return \$out;
+    function cw_is_list(array \$a): bool {
+        // true for sequential numeric keys starting at 0
+        return array_values(\$a) === \$a;
     }
     function cw_standardize_post(array \$x, string \$fallbackSlug, int \$mtime): array {
         \$slug = (string) (\$x['slug'] ?? \$fallbackSlug);
@@ -306,19 +282,21 @@ if (!function_exists('cw_locate_data_bases')) {
     function cw_posts_all(array \$config): array {
         \$bases = cw_locate_data_bases(\$config);
         \$checked = [];
-        // 1) Try index files
+
+        // 1) Try index files in each base
         foreach (\$bases as \$base) {
-            foreach (['posts.json','posts/posts.json','index.json','articles.json'] as \$idx) {
+            foreach (['posts.json','posts/posts.json'] as \$idx) {
                 \$file = rtrim(\$base,'/') . '/' . \$idx; \$checked[] = \$file;
                 if (is_file(\$file)) {
                     \$j = cw_read_json_assoc(\$file);
                     if (!is_array(\$j)) continue;
-                    if (isset(\$j['posts'])    && is_array(\$j['posts']))    { \$arr = \$j['posts']; }
-                    elseif (isset(\$j['items'])    && is_array(\$j['items']))    { \$arr = \$j['items']; }
-                    elseif (isset(\$j['articles']) && is_array(\$j['articles'])) { \$arr = \$j['articles']; }
-                    elseif (array_keys(\$j) === range(0, max(0, count(\$j)-1)))  { \$arr = \$j; } // plain array
-                    else { continue; }
-
+                    if (isset(\$j['posts']) && is_array(\$j['posts'])) {
+                        \$arr = \$j['posts'];
+                    } elseif (cw_is_list(\$j)) {
+                        \$arr = \$j; // plain array of posts
+                    } else {
+                        continue;
+                    }
                     \$out = [];
                     foreach (\$arr as \$row) {
                         if (!is_array(\$row)) continue;
@@ -326,37 +304,36 @@ if (!function_exists('cw_locate_data_bases')) {
                         \$out[] = cw_standardize_post(\$row, \$fileSlug !== '' ? \$fileSlug : 'post-'.(count(\$out)+1), @filemtime(\$file));
                     }
                     if (\$out) {
-                        usort(\$out, fn(\$a,\$b)=> strcmp((\$b['published_at'] ?? '').(\$b['slug'] ?? ''), (\$a['published_at'] ?? '').(\$a['slug'] ?? '')));
+                        usort(\$out, function(\$a,\$b){
+                            return strcmp((\$b['published_at'] ?? '').(\$b['slug'] ?? ''), (\$a['published_at'] ?? '').(\$a['slug'] ?? ''));
+                        });
                         return \$out;
                     }
                 }
             }
         }
-        // 2) Fallback: scan directories for JSON/MD
+
+        // 2) Fallback: scan posts directories for JSON files
         foreach (\$bases as \$base) {
-            foreach (['posts','articles','content/posts','content'] as \$dirRel) {
+            foreach (['posts','articles','content/posts'] as \$dirRel) {
                 \$dir = rtrim(\$base,'/') . '/' . \$dirRel; \$checked[] = \$dir;
                 if (!is_dir(\$dir)) continue;
                 \$tmp = [];
-                \$files = array_merge(glob(\$dir.'/*.json') ?: [], glob(\$dir.'/*.md') ?: []);
+                \$files = glob(\$dir.'/*.json') ?: [];
                 foreach (\$files as \$f) {
-                    \$mtime = @filemtime(\$f) ?: time();
-                    if (substr(\$f,-3) === '.md') {
-                        \$md = (string) @file_get_contents(\$f);
-                        \$meta = cw_parse_front_matter(\$md);
-                        \$tmp[] = cw_standardize_post(\$meta, basename(\$f, '.md'), \$mtime);
-                    } else {
-                        \$x = cw_read_json_assoc(\$f);
-                        if (!is_array(\$x)) continue;
-                        \$tmp[] = cw_standardize_post(\$x, basename(\$f, '.json'), \$mtime);
-                    }
+                    \$x = cw_read_json_assoc(\$f);
+                    if (!is_array(\$x)) continue;
+                    \$tmp[] = cw_standardize_post(\$x, basename(\$f, '.json'), @filemtime(\$f) ?: time());
                 }
                 if (\$tmp) {
-                    usort(\$tmp, fn(\$a,\$b)=> strcmp((\$b['published_at'] ?? '').(\$b['slug'] ?? ''), (\$a['published_at'] ?? '').(\$a['slug'] ?? '')));
+                    usort(\$tmp, function(\$a,\$b){
+                        return strcmp((\$b['published_at'] ?? '').(\$b['slug'] ?? ''), (\$a['published_at'] ?? '').(\$a['slug'] ?? ''));
+                    });
                     return \$tmp;
                 }
             }
         }
+
         if (!empty(\$checked)) {
             @error_log('TemplateSynth: no posts found. Checked: '.implode(', ', \$checked));
         }
