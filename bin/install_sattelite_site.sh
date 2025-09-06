@@ -31,7 +31,7 @@ ENV_EXAMPLE="${APP_DIR}/.env.example"
 NGX_AVAIL="/etc/nginx/sites-available/${CANON}"
 NGX_ENABLED="/etc/nginx/sites-enabled/${CANON}"
 SSL_SNIPPET="/etc/nginx/snippets/ssl-params.conf"
-API_KEY="XXXXXX"  # Replace with your actual API key
+API_KEY="XXXX"  # Replace with your actual Feed API key
 EMAIL="admin@${CANON#www.}"  # admin@rootdomain
 
 export DEBIAN_FRONTEND=noninteractive
