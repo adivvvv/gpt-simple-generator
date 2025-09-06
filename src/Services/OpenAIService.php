@@ -29,12 +29,12 @@ final class OpenAIService
      */
     public function generateArticle(array $payload, array $refs, array $schema): array
     {
-        $lang      = (string)$payload['lang'];
-        $subject   = (string)($payload['subject'] ?? '');
-        $lead      = (string)($payload['leadStyle'] ?? 'surprising-stat');
-        $minSp     = (int)($payload['minSentencesPerParagraph'] ?? 4);
-        $pmidMode  = (string)($payload['pmidMode'] ?? 'limited'); // none|limited
-        $maxInline = (int)($payload['maxInlinePmids'] ?? 3);
+        $lang       = (string)$payload['lang'];
+        $subject    = (string)($payload['subject'] ?? '');
+        $lead       = (string)($payload['leadStyle'] ?? 'surprising-stat');
+        $minSp      = (int)($payload['minSentencesPerParagraph'] ?? 4);
+        $pmidMode   = (string)($payload['pmidMode'] ?? 'limited'); // none|limited
+        $maxInline  = (int)($payload['maxInlinePmids'] ?? 3);
         $banPhrases = (array)($payload['banPhrases'] ?? []);
 
         $allowedPmids = [];
@@ -161,14 +161,14 @@ final class OpenAIService
             'required' => ['subject'],
             'additionalProperties' => false,
             'properties' => [
-                'subject' => ['type'=>'string']
+                'subject' => ['type' => 'string']
             ]
         ];
 
         $system = "Translate the given subject/title into {$lang}. Preserve meaning, brevity, and key terms (e.g., 'camel milk'). Return ONLY JSON with a single field 'subject'.";
         $inputBlocks = [
-            ['role'=>'system','content'=>[['type'=>'input_text','text'=>$system]]],
-            ['role'=>'user','content'=>[['type'=>'input_text','text'=>"SUBJECT:\n".$subject]]],
+            ['role' => 'system', 'content' => [['type' => 'input_text', 'text' => $system]]],
+            ['role' => 'user',   'content' => [['type' => 'input_text', 'text' => "SUBJECT:\n" . $subject]]],
         ];
 
         try {
@@ -182,7 +182,7 @@ final class OpenAIService
             $candidate = (string)($out['subject'] ?? '');
             return $candidate !== '' ? $candidate : $subject;
         } catch (\Throwable $e) {
-            Logger::error('translateSubject failed', ['err'=>$e->getMessage()]);
+            Logger::error('translateSubject failed', ['err' => $e->getMessage()]);
             return $subject;
         }
     }
@@ -197,13 +197,15 @@ final class OpenAIService
             throw new \RuntimeException('template_plan.schema.json missing');
         }
 
-        // Stronger instruction: explicitly list required keys
+        // Stronger instruction: explicitly list required keys + enforce seed-driven variety
         $system = implode("\n", [
             "You are a senior web theme designer.",
             "Goal: Propose a small design system for a text-only, image-free, cookie-free, Tailwind-like site.",
             "MUST OUTPUT JSON with EXACT keys: seed, name, prefix, palette, type_scale, layout, copy.",
             "Rules:",
             "- Copy seed from user payload.",
+            "- IMPORTANT: Different seeds MUST lead to meaningfully different choices (name, palette, layout and prefix).",
+            "- Do NOT invent or alter the seed; copy it exactly.",
             "- name: short human-friendly theme name (2–3 words, Title Case).",
             "- prefix: lowercase CSS class prefix (<=15 chars), pattern ^[a-z][a-z0-9-]{1,14}$ (e.g., cw-a7).",
             "- palette: bg, card, fg, muted, accent, accent_ink, border (accessible contrast, WCAG AA).",
@@ -223,8 +225,8 @@ final class OpenAIService
         ];
 
         $inputBlocks = [
-            ['role'=>'system','content'=>[['type'=>'input_text','text'=>$system]]],
-            ['role'=>'user','content'=>[['type'=>'input_text','text'=>"USER_PAYLOAD_JSON:\n".json_encode($user, JSON_UNESCAPED_UNICODE)]]],
+            ['role' => 'system', 'content' => [['type' => 'input_text', 'text' => $system]]],
+            ['role' => 'user',   'content' => [['type' => 'input_text', 'text' => "USER_PAYLOAD_JSON:\n" . json_encode($user, JSON_UNESCAPED_UNICODE)]]],
         ];
 
         $out = $this->responsesCall(
@@ -232,28 +234,28 @@ final class OpenAIService
             inputBlocks: $inputBlocks,
             schemaName: 'template_plan',
             schema: $schema,
-            temperature: 0.55
+            temperature: 0.65
         );
 
         // Harden required fields
-        // 1) seed must echo input
-        $out['seed'] = $out['seed'] ?? $seed;
+        // 1) seed MUST equal input (never trust model to override)
+        $out['seed'] = $seed;
 
         // 2) prefix fallback (valid + deterministic)
         if (empty($out['prefix']) || !preg_match('/^[a-z][a-z0-9-]{1,14}$/', (string)$out['prefix'])) {
             $out['prefix'] = 'cw-' . substr(preg_replace('/[^a-z0-9]/', '', strtolower(hash('sha1', $seed))), 0, 10);
         }
 
-        // 3) name fallback (deterministic, readable)
-        if (empty($out['name'])) {
+        // 3) name fallback (deterministic, readable) OR if too-generic pattern repeats
+        if (empty($out['name']) || preg_match('/^clean\\s+airy\\s+theme$/i', (string)$out['name'])) {
             $out['name'] = $this->themeNameFromSeed($seed, $styleFlags, $lang);
         }
 
         // Final strict check (will now pass)
         foreach (['seed','name','prefix','palette','type_scale','layout','copy'] as $k) {
             if (!isset($out[$k])) {
-                \App\Support\Logger::error('template plan missing key', ['key'=>$k,'out'=>$out]);
-                throw new \RuntimeException('Template plan missing key: '.$k);
+                \App\Support\Logger::error('template plan missing key', ['key' => $k, 'out' => $out]);
+                throw new \RuntimeException('Template plan missing key: ' . $k);
             }
         }
         return $out;
@@ -413,5 +415,4 @@ final class OpenAIService
         \App\Support\Logger::error('OpenAI unexpected shape', ['sample' => substr(json_encode($data), 0, 1000)]);
         throw new \RuntimeException('OpenAI response missing valid JSON.');
     }
-
 }
