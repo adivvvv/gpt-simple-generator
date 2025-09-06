@@ -218,8 +218,8 @@ CSS;
     }
 
     private function headerPhp(string $pre, array $l): string
-    {
-        $rail = $l['header_variant'] === 'rail' ? <<<HTML
+{
+    $rail = $l['header_variant'] === 'rail' ? <<<HTML
   <?php if (\$latest): ?>
   <div class="$pre-header-rail" aria-label="Latest articles">
     <span class="$pre-rail-label">Latest:</span>
@@ -232,19 +232,44 @@ CSS;
   <?php endif; ?>
 HTML : '';
 
-        return <<<PHP
+    return <<<PHP
 <?php
 /** @var array \$config */
 \$site = \$config['site_name'] ?? 'CamelWay';
 \$shop = \$config['shop_url']  ?? 'https://camelway.eu/';
 \$base = \$config['base_url']  ?? '/';
 
-// Latest posts for header rail
-\$postsIdx = __DIR__ . '/../../data/posts.json';
+/* Robust latest posts loader (works with both index paths; scans as fallback) */
 \$latest = [];
-if (is_file(\$postsIdx)) {
-    \$json = json_decode((string)file_get_contents(\$postsIdx), true);
-    \$latest = array_slice(\$json['posts'] ?? [], 0, 10);
+\$candidates = [
+    __DIR__ . '/../../data/posts.json',        // current location
+    __DIR__ . '/../../data/posts/posts.json',  // legacy placeholder path
+];
+\$found = false;
+foreach (\$candidates as \$c) {
+    if (is_file(\$c)) {
+        \$j = json_decode((string)file_get_contents(\$c), true);
+        if (is_array(\$j) && !empty(\$j['posts'])) {
+            \$latest = array_slice(\$j['posts'], 0, 10);
+            \$found = true;
+            break;
+        }
+    }
+}
+if (!\$found) {
+    \$dir = __DIR__ . '/../../data/posts';
+    if (is_dir(\$dir)) {
+        \$tmp = [];
+        foreach (glob(\$dir.'/*.json') as \$f) {
+            \$x = json_decode((string)file_get_contents(\$f), true);
+            if (!is_array(\$x)) continue;
+            \$tmp[] = [
+                'title' => (string)(\$x['title'] ?? basename(\$f, '.json')),
+                'slug'  => (string)(\$x['slug']  ?? basename(\$f, '.json')),
+            ];
+        }
+        \$latest = array_slice(\$tmp, 0, 10);
+    }
 }
 ?>
 <header class="$pre-header">
@@ -259,7 +284,8 @@ if (is_file(\$postsIdx)) {
   {$rail}
 </header>
 PHP;
-    }
+}
+
 
     private function ctaPhp(string $pre, array $copy): string
     {
@@ -303,24 +329,50 @@ PHP;
     }
 
     private function homePhp(string $pre, string $lang, array $copy, array $l): string
-    {
-        return <<<PHP
+{
+    return <<<PHP
 <?php require __DIR__.'/partial-icons.php'; require __DIR__.'/partial-header.php';
 /** Pagination + posts */
 \$perPage = (int)(\$config['posts_per_page'] ?? 20);
 \$page    = max(1, (int)(\$_GET['page'] ?? 1));
-\$idxFile = __DIR__ . '/../../data/posts.json';
-\$posts   = [];
-\$all     = [];
-\$total   = 0;
 
-if (is_file(\$idxFile)) {
-  \$json = json_decode((string)file_get_contents(\$idxFile), true);
-  \$all  = \$json['posts'] ?? [];
-  \$total = count(\$all);
-  \$start = (\$page - 1) * \$perPage;
-  \$posts = array_slice(\$all, \$start, \$perPage);
+/* Robust posts index loader (supports both paths; scans as fallback) */
+\$all = [];
+\$candidates = [
+  __DIR__ . '/../../data/posts.json',
+  __DIR__ . '/../../data/posts/posts.json',
+];
+foreach (\$candidates as \$c) {
+  if (is_file(\$c)) {
+    \$j = json_decode((string)file_get_contents(\$c), true);
+    if (is_array(\$j) && !empty(\$j['posts']) && is_array(\$j['posts'])) {
+      \$all = \$j['posts'];
+      break;
+    }
+  }
 }
+if (!\$all) {
+  // Final fallback: scan post files and build a minimal index
+  \$dir = __DIR__ . '/../../data/posts';
+  if (is_dir(\$dir)) {
+    foreach (glob(\$dir.'/*.json') as \$f) {
+      \$x = json_decode((string)file_get_contents(\$f), true);
+      if (!is_array(\$x)) continue;
+      \$all[] = [
+        'title'        => (string)(\$x['title'] ?? basename(\$f, '.json')),
+        'slug'         => (string)(\$x['slug']  ?? basename(\$f, '.json')),
+        'summary'      => (string)(\$x['summary'] ?? ''),
+        'tags'         => (array) (\$x['tags'] ?? []),
+        'published_at' => (string)(\$x['published_at'] ?? date('Y-m-d', @filemtime(\$f) ?: time())),
+      ];
+    }
+    usort(\$all, fn(\$a,\$b) => strcmp((\$b['published_at'] ?? '').(\$b['slug'] ?? ''), (\$a['published_at'] ?? '').(\$a['slug'] ?? '')));
+  }
+}
+
+\$total = count(\$all);
+\$start = (\$page - 1) * \$perPage;
+\$posts = array_slice(\$all, \$start, \$perPage);
 \$totalPages = max(1, (int)ceil(\$total / \$perPage));
 
 /** Build a page link */
@@ -329,7 +381,7 @@ if (is_file(\$idxFile)) {
 \$atomHref = (\$config['base_url'] ?? '').'/atom.xml';
 \$cssver   = @filemtime(__DIR__ . '/../../public/assets/tailwind.css') ?: time();
 
-/** JSON-LD for homepage: WebSite + ItemList of latest 20 */
+/** JSON-LD for homepage: WebSite + ItemList (latest 20) */
 \$siteJsonLd = [
   '@context' => 'https://schema.org',
   '@type'    => 'WebSite',
@@ -339,18 +391,14 @@ if (is_file(\$idxFile)) {
 \$latestList = array_slice(\$all, 0, 20);
 \$items = [];
 foreach (\$latestList as \$i => \$p) {
-    \$items[] = [
-        '@type'    => 'ListItem',
-        'position' => \$i + 1,
-        'url'      => (string)((\$config['base_url'] ?? '').'/' . (\$p['slug'] ?? '')),
-        'name'     => (string)(\$p['title'] ?? '')
-    ];
+  \$items[] = [
+    '@type'    => 'ListItem',
+    'position' => \$i + 1,
+    'url'      => (string)((\$config['base_url'] ?? '').'/'.(\$p['slug'] ?? '')),
+    'name'     => (string)(\$p['title'] ?? ''),
+  ];
 }
-\$listJsonLd = [
-  '@context'        => 'https://schema.org',
-  '@type'           => 'ItemList',
-  'itemListElement' => \$items
-];
+\$listJsonLd = ['@context'=>'https://schema.org','@type'=>'ItemList','itemListElement'=>\$items];
 ?>
 <!doctype html>
 <html lang="<?=htmlspecialchars(\$config['lang'] ?? '$lang')?>">
@@ -433,7 +481,8 @@ foreach (\$latestList as \$i => \$p) {
 </body>
 </html>
 PHP;
-    }
+}
+
 
     private function articlePhp(string $pre, string $lang): string
     {
