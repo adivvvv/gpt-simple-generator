@@ -540,8 +540,9 @@ PHP;
 
     private function homePhp(string $pre, string $lang, array $copy, array $l, array $Le, string $L_shop): string
     {
+        // NOTE: header is now required *inside <body>* to keep it below <!doctype html> and <head>.
         return <<<PHP
-<?php require __DIR__.'/partial-icons.php'; require __DIR__.'/partial-header.php';
+<?php require __DIR__.'/partial-icons.php';
 /** @var array \$config */
 
 /** Pagination + posts (using the shared loader from partial-header.php) */
@@ -593,6 +594,7 @@ foreach (\$latestList as \$i => \$pItem) {
   <script type="application/ld+json"><?=json_encode(\$listJsonLd, JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE)?></script>
 </head>
 <body class="$pre-body">
+  <?php require __DIR__.'/partial-header.php'; ?>
   <main class="$pre-container">
     <!-- Hero -->
     <section class="$pre-hero">
@@ -672,8 +674,9 @@ PHP;
 
     private function articlePhp(string $pre, string $lang, array $Le): string
     {
+        // NOTE: header is now required *inside <body>* to keep it below <!doctype html> and <head>.
         return <<<PHP
-<?php require __DIR__.'/partial-icons.php'; require __DIR__.'/partial-header.php';
+<?php require __DIR__.'/partial-icons.php';
 /** @var array \$post loaded by Router */
 \$title   = \$post['title']   ?? 'Article';
 \$summary = \$post['summary'] ?? '';
@@ -737,6 +740,7 @@ if (!empty(\$faqs) && is_array(\$faqs)) {
   <?php if (\$faqJsonLd): ?><script type="application/ld+json"><?=json_encode(\$faqJsonLd, JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE)?></script><?php endif; ?>
 </head>
 <body class="$pre-body">
+  <?php require __DIR__.'/partial-header.php'; ?>
   <main class="$pre-container">
     <?php require __DIR__.'/partial-cta.php'; ?>
 
