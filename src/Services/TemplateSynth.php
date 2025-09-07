@@ -240,6 +240,7 @@ CSS;
   <?php endif; ?>
 HTML : '';
 
+        // IMPORTANT: build helpers & data as before, but CAPTURE the <header> markup into $cw_header_html.
         return <<<PHP
 <?php
 /** @var array \$config */
@@ -482,6 +483,9 @@ if (!function_exists('cw_intro_for_slug')) {
 
 /* Build 'latest' preview safely */
 \$latest = array_slice(cw_posts_all(\$config), 0, 10);
+
+/* ---- CAPTURE the visual header HTML for later output in <body> ---- */
+ob_start();
 ?>
 <header class="$pre-header">
   <div class="$pre-container $pre-header-bar">
@@ -494,6 +498,10 @@ if (!function_exists('cw_intro_for_slug')) {
   </div>
   {$rail}
 </header>
+<?php
+// Expose captured markup to templates; nothing is echoed yet.
+$cw_header_html = ob_get_clean();
+?>
 PHP;
     }
 
@@ -540,9 +548,9 @@ PHP;
 
     private function homePhp(string $pre, string $lang, array $copy, array $l, array $Le, string $L_shop): string
     {
-        // NOTE: header is now required *inside <body>* to keep it below <!doctype html> and <head>.
+        // Keep requiring partial-header.php early (to run helpers), but print header markup later via $cw_header_html.
         return <<<PHP
-<?php require __DIR__.'/partial-icons.php';
+<?php require __DIR__.'/partial-icons.php'; require __DIR__.'/partial-header.php';
 /** @var array \$config */
 
 /** Pagination + posts (using the shared loader from partial-header.php) */
@@ -594,7 +602,7 @@ foreach (\$latestList as \$i => \$pItem) {
   <script type="application/ld+json"><?=json_encode(\$listJsonLd, JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE)?></script>
 </head>
 <body class="$pre-body">
-  <?php require __DIR__.'/partial-header.php'; ?>
+  <?php echo \$cw_header_html ?? ''; ?>
   <main class="$pre-container">
     <!-- Hero -->
     <section class="$pre-hero">
@@ -674,9 +682,9 @@ PHP;
 
     private function articlePhp(string $pre, string $lang, array $Le): string
     {
-        // NOTE: header is now required *inside <body>* to keep it below <!doctype html> and <head>.
+        // Require header early (to run helpers) but print its markup later via $cw_header_html.
         return <<<PHP
-<?php require __DIR__.'/partial-icons.php';
+<?php require __DIR__.'/partial-icons.php'; require __DIR__.'/partial-header.php';
 /** @var array \$post loaded by Router */
 \$title   = \$post['title']   ?? 'Article';
 \$summary = \$post['summary'] ?? '';
@@ -740,7 +748,7 @@ if (!empty(\$faqs) && is_array(\$faqs)) {
   <?php if (\$faqJsonLd): ?><script type="application/ld+json"><?=json_encode(\$faqJsonLd, JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE)?></script><?php endif; ?>
 </head>
 <body class="$pre-body">
-  <?php require __DIR__.'/partial-header.php'; ?>
+  <?php echo \$cw_header_html ?? ''; ?>
   <main class="$pre-container">
     <?php require __DIR__.'/partial-cta.php'; ?>
 
