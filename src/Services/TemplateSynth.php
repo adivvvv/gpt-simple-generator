@@ -226,8 +226,8 @@ CSS;
     }
 
     private function headerPhp(string $pre, array $l, array $Le): string
-{
-    $rail = $l['header_variant'] === 'rail' ? <<<HTML
+    {
+        $rail = $l['header_variant'] === 'rail' ? <<<HTML
   <?php if (\$latest): ?>
   <div class="$pre-header-rail" aria-label="{$Le['latest_aria']}">
     <span class="$pre-rail-label">{$Le['latest']}:</span>
@@ -240,7 +240,7 @@ CSS;
   <?php endif; ?>
 HTML : '';
 
-    return <<<PHP
+        return <<<PHP
 <?php
 /** @var array \$config */
 \$site = \$config['site_name'] ?? 'CamelWay';
@@ -339,8 +339,68 @@ if (!function_exists('cw_locate_data_bases')) {
         }
         return [];
     }
-}
 
+    /* ---- Intro helpers (shared by home.php + article.php) ---- */
+    function cw_intro_clip(string \$text, int \$max=160): string {
+        \$text = trim(preg_replace('/\\s+/u', ' ', html_entity_decode(\$text, ENT_QUOTES|ENT_SUBSTITUTE, 'UTF-8')) ?? '');
+        if (\$text === '') return '';
+        if (function_exists('mb_strlen') ? mb_strlen(\$text,'UTF-8') <= \$max : strlen(\$text) <= \$max) return \$text;
+        \$cut = function_exists('mb_substr') ? mb_substr(\$text, 0, \$max, 'UTF-8') : substr(\$text, 0, \$max);
+        // avoid chopping last word
+        if (preg_match('/^(.+?)\\b[\\s\\S]*$/u', \$cut, \$m)) \$cut = \$m[1];
+        return rtrim(\$cut, " ,.;:–-").'…';
+    }
+    function cw_html_paragraphs(string \$html): array {
+        if (\$html === '') return [];
+        if (!preg_match_all('/<p\\b[^>]*>(.*?)<\\/p>/is', \$html, \$m)) return [];
+        \$out = [];
+        foreach (\$m[1] as \$seg) { \$out[] = trim(strip_tags(\$seg)); }
+        return array_values(array_filter(\$out, fn(\$x)=>\$x!==''));
+    }
+    function cw_markdown_paragraphs(string \$md): array {
+        if (\$md === '') return [];
+        // drop front matter if any
+        if (substr(\$md,0,4) === "---\\n") {
+            \$end = strpos(\$md, "\\n---", 4);
+            if (\$end !== false) \$md = substr(\$md, \$end+4);
+        }
+        \$parts = preg_split('/\\R{2,}/', \$md) ?: [];
+        \$out = [];
+        foreach (\$parts as \$p) {
+            \$p = trim(preg_replace('/^#+\\s*/m','', \$p));
+            if (\$p !== '') \$out[] = \$p;
+        }
+        return \$out;
+    }
+    function cw_intro_from_fields(array \$post): string {
+        \$bodyHtml = (string) (\$post['body'] ?? '');
+        \$bodyMd   = (string) (\$post['body_markdown'] ?? '');
+        \$paras = [];
+        if (\$bodyHtml !== '') \$paras = cw_html_paragraphs(\$bodyHtml);
+        if (!$paras && \$bodyMd !== '') \$paras = cw_markdown_paragraphs(\$bodyMd);
+        // prefer 2nd paragraph; fallback to 1st; finally summary/title
+        \$p2 = \$paras[1] ?? (\$paras[0] ?? '');
+        if (\$p2 === '') \$p2 = (string) (\$post['summary'] ?? (\$post['title'] ?? ''));
+        return cw_intro_clip(\$p2, 160);
+    }
+    function cw_load_post_json(array \$bases, string \$slug) {
+        foreach (\$bases as \$base) {
+            \$path = rtrim(\$base,'/') . '/posts/' . \$slug . '.json';
+            if (is_file(\$path)) {
+                \$j = cw_read_json_assoc(\$path);
+                if (is_array(\$j)) return \$j;
+            }
+        }
+        return null;
+    }
+    function cw_intro_for_slug(string \$slug, array \$config, string \$fallback=''): string {
+        \$bases = cw_locate_data_bases(\$config);
+        \$j = \$slug !== '' ? cw_load_post_json(\$bases, \$slug) : null;
+        if (is_array(\$j)) return cw_intro_from_fields(\$j);
+        return cw_intro_clip(\$fallback !== '' ? \$fallback : '', 160);
+    }
+}
+ 
 /* Build 'latest' preview safely */
 \$latest = array_slice(cw_posts_all(\$config), 0, 10);
 ?>
@@ -356,7 +416,7 @@ if (!function_exists('cw_locate_data_bases')) {
   {$rail}
 </header>
 PHP;
-}
+    }
 
     private function ctaPhp(string $pre, array $copy, string $L_shop): string
     {
@@ -445,7 +505,7 @@ foreach (\$latestList as \$i => \$pItem) {
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title><?=htmlspecialchars(\$config['site_name'] ?? 'CamelWay')?></title>
-  <meta name="description" content="Evidence-first articles about camel milk — readable, fast, and text-only.">
+  <meta name="description" content="<?=htmlspecialchars(\$config['meta_description'] ?? 'Evidence-first articles about camel milk — readable, fast, and text-only.')?>">
   <link rel="canonical" href="<?=htmlspecialchars((\$config['base_url'] ?? '/'))?>">
   <link rel="stylesheet" href="/assets/tailwind.css?v=<?=rawurlencode((string)\$cssver)?>">
   <link rel="alternate" type="application/rss+xml"  title="<?=htmlspecialchars((\$config['site_name'] ?? 'CamelWay')).' RSS'?>"  href="<?=htmlspecialchars(\$rssHref)?>">
@@ -477,7 +537,15 @@ foreach (\$latestList as \$i => \$pItem) {
               <h3 class="$pre-card-title">
                 <a href="<?=(\$config['base_url'] ?? '').'/'.htmlspecialchars(\$p['slug'] ?? '')?>"><?=htmlspecialchars(\$p['title'] ?? '')?></a>
               </h3>
-              <?php if (!empty(\$p['summary'])): ?><p class="$pre-card-summary"><?=htmlspecialchars(\$p['summary'])?></p><?php endif; ?>
+              <?php
+                // Use short intro (second paragraph clipped) from the full post file when possible.
+                \$intro = function_exists('cw_intro_for_slug')
+                    ? cw_intro_for_slug((string)(\$p['slug'] ?? ''), \$config, (string)(\$p['summary'] ?? ''))
+                    : (string)(\$p['summary'] ?? '');
+                if (\$intro !== ''):
+              ?>
+                <p class="$pre-card-summary"><?=htmlspecialchars(\$intro)?></p>
+              <?php endif; ?>
               <div class="$pre-card-meta">
                 <span><?=(function_exists('icon') ? icon('calendar') : '📅')?> <?=htmlspecialchars(\$p['published_at'] ?? '')?></span>
                 <?php if (!empty(\$p['tags']) && is_array(\$p['tags'])): ?>
@@ -538,6 +606,14 @@ PHP;
 \$atomHref = (\$config['base_url'] ?? '').'/atom.xml';
 \$cssver   = @filemtime(__DIR__ . '/../../public/assets/tailwind.css') ?: time();
 
+/* Meta description: short intro from 2nd paragraph (clip to 160). */
+if (function_exists('cw_intro_from_fields')) {
+    \$metaDesc = cw_intro_from_fields(\$post);
+} else {
+    // very small fallback if helpers were not loaded for some reason
+    \$metaDesc = is_string(\$summary) && \$summary !== '' ? \$summary : (is_string(\$title) ? \$title : '');
+}
+
 /** JSON-LD for article + optional FAQ */
 \$url = (string)((\$config['base_url'] ?? '/').'/'.(\$post['slug'] ?? ''));
 \$articleJsonLd = [
@@ -545,7 +621,7 @@ PHP;
   '@type'           => 'BlogPosting',
   'mainEntityOfPage'=> ['@type'=>'WebPage','@id'=>\$url],
   'headline'        => (string)\$title,
-  'description'     => (string)\$summary,
+  'description'     => (string)\$metaDesc,
   'datePublished'   => (string)(\$post['published_at'] ?? ''),
   'dateModified'    => (string)(\$post['updated_at'] ?? (\$post['published_at'] ?? '')),
   'publisher'       => ['@type'=>'Organization','name'=>(string)(\$config['site_name'] ?? 'CamelWay')],
@@ -574,7 +650,7 @@ if (!empty(\$faqs) && is_array(\$faqs)) {
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title><?=htmlspecialchars(\$title)?> — <?=htmlspecialchars(\$config['site_name'] ?? 'CamelWay')?></title>
-  <meta name="description" content="<?=htmlspecialchars(\$summary)?>">
+  <meta name="description" content="<?=htmlspecialchars(\$metaDesc)?>">
   <link rel="canonical" href="<?=htmlspecialchars(\$url)?>">
   <link rel="stylesheet" href="/assets/tailwind.css?v=<?=rawurlencode((string)\$cssver)?>">
   <link rel="alternate" type="application/rss+xml"  title="<?=htmlspecialchars((\$config['site_name'] ?? 'CamelWay')).' RSS'?>"  href="<?=htmlspecialchars(\$rssHref)?>">
@@ -589,7 +665,13 @@ if (!empty(\$faqs) && is_array(\$faqs)) {
     <article class="$pre-article">
       <header class="$pre-article-header">
         <h1 class="$pre-article-title"><?=htmlspecialchars(\$title)?></h1>
-        <?php if (\$summary): ?><p class="$pre-article-summary"><?=htmlspecialchars(\$summary)?></p><?php endif; ?>
+        <?php
+          // Prefer saved summary if present; otherwise show computed intro under the title.
+          \$headerSummary = \$summary !== '' ? \$summary : \$metaDesc;
+          if (\$headerSummary):
+        ?>
+          <p class="$pre-article-summary"><?=htmlspecialchars(\$headerSummary)?></p>
+        <?php endif; ?>
         <?php if (!empty(\$tags)): ?>
           <p class="$pre-article-tags">
             <?php foreach (\$tags as \$t): ?><span class="$pre-tag"><?=(function_exists('icon') ? icon('tag') : '#')?> <?=htmlspecialchars(\$t)?></span><?php endforeach; ?>
