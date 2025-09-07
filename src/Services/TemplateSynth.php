@@ -226,11 +226,11 @@ CSS;
     }
 
     private function headerPhp(string $pre, array $l, array $Le): string
-{
-    // Prebuild the optional rail block at GENERATION time (no PHP-in-string).
-    $railBlock = '';
-    if (($l['header_variant'] ?? '') === 'rail') {
-        $railBlock = <<<HTML
+    {
+        // Prebuild the optional rail block at GENERATION time (no PHP-in-string).
+        $railBlock = '';
+        if (($l['header_variant'] ?? '') === 'rail') {
+            $railBlock = <<<HTML
   <?php if (\$latest): ?>
   <div class="{$pre}-header-rail" aria-label="{$Le['latest_aria']}">
     <span class="{$pre}-rail-label">{$Le['latest']}:</span>
@@ -245,9 +245,9 @@ CSS;
   </div>
   <?php endif; ?>
 HTML;
-    }
+        }
 
-    return <<<PHP
+        return <<<PHP
 <?php
 /** @var array \$config */
 \$site = \$config['site_name'] ?? 'CamelWay';
@@ -465,9 +465,9 @@ ob_start();
   <div class="{$pre}-container {$pre}-header-bar">
     <a class="{$pre}-brand" href="<?php echo \$base; ?>"><?php echo htmlspecialchars(\$site); ?></a>
     <nav class="{$pre}-nav">
-      <a class="{$pre}-nav-link" href="<?php echo \$base; ?>">{{$Le['home']}}</a>
-      <a class="{$pre}-nav-link" href="<?php echo \$base; ?>?page=1#recent">{{$Le['recent']}}</a>
-      <a class="{$pre}-button" href="<?php echo \$shop; ?>">{{$Le['shop_now']}} <?php echo (function_exists('icon') ? icon('arrow-right') : '→'); ?></a>
+      <a class="{$pre}-nav-link" href="<?php echo \$base; ?>"><?= '{$Le['home']}' ?></a>
+      <a class="{$pre}-nav-link" href="<?php echo \$base; ?>?page=1#recent"><?= '{$Le['recent']}' ?></a>
+      <a class="{$pre}-button" href="<?php echo \$shop; ?>"><?= '{$Le['shop_now']}' ?> <?php echo (function_exists('icon') ? icon('arrow-right') : '→'); ?></a>
     </nav>
   </div>
 {$railBlock}
@@ -476,8 +476,7 @@ ob_start();
 \$cw_header_html = ob_get_clean();
 ?>
 PHP;
-}
-
+    }
 
     private function ctaPhp(string $pre, array $copy, string $L_shop): string
     {
