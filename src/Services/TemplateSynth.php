@@ -247,7 +247,9 @@ HTML : '';
 \$shop = \$config['shop_url']  ?? 'https://camelway.eu/';
 \$base = \$config['base_url']  ?? '/';
 
-/* ---------- Robust posts loader (JSON-only; shared by header + home) ---------- */
+/* ---------- Post + Intro helpers (JSON-only; shared by header + home + article) ---------- */
+
+/* Guard every helper with function_exists to avoid re-declare issues. */
 if (!function_exists('cw_locate_data_bases')) {
     function cw_locate_data_bases(array \$config): array {
         \$bases = [];
@@ -258,16 +260,21 @@ if (!function_exists('cw_locate_data_bases')) {
         \$bases[] = __DIR__ . '/../../data';
         return array_values(array_unique(\$bases));
     }
+}
+if (!function_exists('cw_read_json_assoc')) {
     function cw_read_json_assoc(string \$file) {
         \$raw = @file_get_contents(\$file);
         if (\$raw === false) return null;
         \$j = json_decode(\$raw, true);
         return (json_last_error() === JSON_ERROR_NONE) ? \$j : null;
     }
+}
+if (!function_exists('cw_is_list')) {
     function cw_is_list(array \$a): bool {
-        // true for sequential numeric keys starting at 0
-        return array_values(\$a) === \$a;
+        return array_values(\$a) === \$a; // true for sequential numeric keys starting at 0
     }
+}
+if (!function_exists('cw_standardize_post')) {
     function cw_standardize_post(array \$x, string \$fallbackSlug, int \$mtime): array {
         \$slug = (string) (\$x['slug'] ?? \$fallbackSlug);
         \$slug = ltrim(preg_replace('/\\.[a-z0-9]+$/i','', \$slug), '/'); // drop extension
@@ -279,6 +286,8 @@ if (!function_exists('cw_locate_data_bases')) {
             'published_at' => (string)(\$x['published_at'] ?? (\$x['date'] ?? date('Y-m-d', \$mtime ?: time()))),
         ];
     }
+}
+if (!function_exists('cw_posts_all')) {
     function cw_posts_all(array \$config): array {
         \$bases = cw_locate_data_bases(\$config);
         \$checked = [];
@@ -339,68 +348,101 @@ if (!function_exists('cw_locate_data_bases')) {
         }
         return [];
     }
+}
 
-    /* ---- Intro helpers (shared by home.php + article.php) ---- */
-    function cw_intro_clip(string \$text, int \$max=160): string {
-        \$text = trim(preg_replace('/\\s+/u', ' ', html_entity_decode(\$text, ENT_QUOTES|ENT_SUBSTITUTE, 'UTF-8')) ?? '');
-        if (\$text === '') return '';
-        if (function_exists('mb_strlen') ? mb_strlen(\$text,'UTF-8') <= \$max : strlen(\$text) <= \$max) return \$text;
-        \$cut = function_exists('mb_substr') ? mb_substr(\$text, 0, \$max, 'UTF-8') : substr(\$text, 0, \$max);
-        // avoid chopping last word
-        if (preg_match('/^(.+?)\\b[\\s\\S]*$/u', \$cut, \$m)) \$cut = \$m[1];
+/* ---- Intro helpers (shared by home.php + article.php) ---- */
+if (!function_exists('cw_intro_clip')) {
+    function cw_intro_clip(string \$text, int \$max = 160): string {
+        // Decode entities, collapse whitespace
+        \$decoded = html_entity_decode(\$text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        \$collapsed = preg_replace('/\\s+/u', ' ', \$decoded);
+        if (\$collapsed === null) { \$collapsed = \$decoded; }
+        \$clean = trim(\$collapsed);
+        if (\$clean === '') return '';
+        if (function_exists('mb_strlen')) {
+            if (mb_strlen(\$clean, 'UTF-8') <= \$max) return \$clean;
+            \$cut = mb_substr(\$clean, 0, \$max, 'UTF-8');
+        } else {
+            if (strlen(\$clean) <= \$max) return \$clean;
+            \$cut = substr(\$clean, 0, \$max);
+        }
+        // Avoid chopping the last word
+        if (preg_match('/^(.+?)\\b[\\s\\S]*$/u', \$cut, \$m)) {
+            \$cut = \$m[1];
+        }
         return rtrim(\$cut, " ,.;:–-").'…';
     }
+}
+if (!function_exists('cw_html_paragraphs')) {
     function cw_html_paragraphs(string \$html): array {
         if (\$html === '') return [];
         if (!preg_match_all('/<p\\b[^>]*>(.*?)<\\/p>/is', \$html, \$m)) return [];
         \$out = [];
-        foreach (\$m[1] as \$seg) { \$out[] = trim(strip_tags(\$seg)); }
-        return array_values(array_filter(\$out, fn(\$x)=>\$x!==''));
+        foreach (\$m[1] as \$seg) {
+            \$out[] = trim(strip_tags(\$seg));
+        }
+        // Remove empties (explicit callback – no arrow fn)
+        \$filtered = array_filter(\$out, function(\$x){ return \$x !== ''; });
+        return array_values(\$filtered);
     }
+}
+if (!function_exists('cw_markdown_paragraphs')) {
     function cw_markdown_paragraphs(string \$md): array {
         if (\$md === '') return [];
         // drop front matter if any
-        if (substr(\$md,0,4) === "---\\n") {
-            \$end = strpos(\$md, "\\n---", 4);
-            if (\$end !== false) \$md = substr(\$md, \$end+4);
+        if (substr(\$md, 0, 4) === "---\n") {
+            \$end = strpos(\$md, "\n---", 4);
+            if (\$end !== false) {
+                \$md = substr(\$md, \$end + 4);
+            }
         }
-        \$parts = preg_split('/\\R{2,}/', \$md) ?: [];
+        \$parts = preg_split('/\\R{2,}/u', \$md);
+        if (!is_array(\$parts)) \$parts = [];
         \$out = [];
         foreach (\$parts as \$p) {
-            \$p = trim(preg_replace('/^#+\\s*/m','', \$p));
+            \$p = preg_replace('/^#+\\s*/m', '', (string)\$p);
+            \$p = trim((string)\$p);
             if (\$p !== '') \$out[] = \$p;
         }
         return \$out;
     }
+}
+if (!function_exists('cw_intro_from_fields')) {
     function cw_intro_from_fields(array \$post): string {
         \$bodyHtml = (string) (\$post['body'] ?? '');
         \$bodyMd   = (string) (\$post['body_markdown'] ?? '');
         \$paras = [];
         if (\$bodyHtml !== '') \$paras = cw_html_paragraphs(\$bodyHtml);
-        if (!$paras && \$bodyMd !== '') \$paras = cw_markdown_paragraphs(\$bodyMd);
+        if (empty(\$paras) && \$bodyMd !== '') \$paras = cw_markdown_paragraphs(\$bodyMd);
         // prefer 2nd paragraph; fallback to 1st; finally summary/title
-        \$p2 = \$paras[1] ?? (\$paras[0] ?? '');
+        \$p2 = isset(\$paras[1]) ? \$paras[1] : (isset(\$paras[0]) ? \$paras[0] : '');
         if (\$p2 === '') \$p2 = (string) (\$post['summary'] ?? (\$post['title'] ?? ''));
         return cw_intro_clip(\$p2, 160);
     }
+}
+if (!function_exists('cw_load_post_json')) {
     function cw_load_post_json(array \$bases, string \$slug) {
         foreach (\$bases as \$base) {
             \$path = rtrim(\$base,'/') . '/posts/' . \$slug . '.json';
-            if (is_file(\$path)) {
+            if (is_file(\$path))) { // safe existence check
                 \$j = cw_read_json_assoc(\$path);
                 if (is_array(\$j)) return \$j;
             }
         }
         return null;
     }
-    function cw_intro_for_slug(string \$slug, array \$config, string \$fallback=''): string {
-        \$bases = cw_locate_data_bases(\$config);
-        \$j = \$slug !== '' ? cw_load_post_json(\$bases, \$slug) : null;
-        if (is_array(\$j)) return cw_intro_from_fields(\$j);
-        return cw_intro_clip(\$fallback !== '' ? \$fallback : '', 160);
+}
+if (!function_exists('cw_intro_for_slug')) {
+    function cw_intro_for_slug(string \$slug, array \$config, string \$fallback = ''): string {
+        if (\$slug !== '') {
+            \$bases = cw_locate_data_bases(\$config);
+            \$j = cw_load_post_json(\$bases, \$slug);
+            if (is_array(\$j)) return cw_intro_from_fields(\$j);
+        }
+        return cw_intro_clip(\$fallback, 160);
     }
 }
- 
+
 /* Build 'latest' preview safely */
 \$latest = array_slice(cw_posts_all(\$config), 0, 10);
 ?>
@@ -476,7 +518,7 @@ if (\$perPage <= 0) \$perPage = 20;
 \$posts = array_slice(\$all, \$start, \$perPage);
 \$totalPages = max(1, (int)ceil(max(1, \$total) / \$perPage));
 
-\$pagelink = fn (int \$p): string => '?page=' . max(1, \$p) . '#recent';
+\$pagelink = function (int \$p): string { return '?page=' . max(1, \$p) . '#recent'; };
 \$rssHref  = (\$config['base_url'] ?? '').'/rss.xml';
 \$atomHref = (\$config['base_url'] ?? '').'/atom.xml';
 \$cssver   = @filemtime(__DIR__ . '/../../public/assets/tailwind.css') ?: time();
@@ -610,8 +652,7 @@ PHP;
 if (function_exists('cw_intro_from_fields')) {
     \$metaDesc = cw_intro_from_fields(\$post);
 } else {
-    // very small fallback if helpers were not loaded for some reason
-    \$metaDesc = is_string(\$summary) && \$summary !== '' ? \$summary : (is_string(\$title) ? \$title : '');
+    \$metaDesc = (\$summary !== '') ? \$summary : (string)\$title;
 }
 
 /** JSON-LD for article + optional FAQ */
@@ -667,7 +708,7 @@ if (!empty(\$faqs) && is_array(\$faqs)) {
         <h1 class="$pre-article-title"><?=htmlspecialchars(\$title)?></h1>
         <?php
           // Prefer saved summary if present; otherwise show computed intro under the title.
-          \$headerSummary = \$summary !== '' ? \$summary : \$metaDesc;
+          \$headerSummary = (\$summary !== '') ? \$summary : \$metaDesc;
           if (\$headerSummary):
         ?>
           <p class="$pre-article-summary"><?=htmlspecialchars(\$headerSummary)?></p>
