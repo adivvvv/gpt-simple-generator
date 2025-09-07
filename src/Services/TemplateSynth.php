@@ -381,7 +381,7 @@ if (!function_exists('cw_html_paragraphs')) {
         foreach (\$m[1] as \$seg) {
             \$out[] = trim(strip_tags(\$seg));
         }
-        // Remove empties (explicit callback – no arrow fn)
+        // Remove empties
         \$filtered = array_filter(\$out, function(\$x){ return \$x !== ''; });
         return array_values(\$filtered);
     }
@@ -424,7 +424,7 @@ if (!function_exists('cw_load_post_json')) {
     function cw_load_post_json(array \$bases, string \$slug) {
         foreach (\$bases as \$base) {
             \$path = rtrim(\$base,'/') . '/posts/' . \$slug . '.json';
-            if (is_file(\$path))) { // safe existence check
+            if (is_file(\$path)) { // fixed stray ')'
                 \$j = cw_read_json_assoc(\$path);
                 if (is_array(\$j)) return \$j;
             }
