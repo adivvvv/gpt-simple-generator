@@ -226,31 +226,35 @@ CSS;
     }
 
     private function headerPhp(string $pre, array $l, array $Le): string
-    {
-        $rail = $l['header_variant'] === 'rail' ? <<<HTML
+{
+    // Prebuild the optional rail block at GENERATION time (no PHP-in-string).
+    $railBlock = '';
+    if (($l['header_variant'] ?? '') === 'rail') {
+        $railBlock = <<<HTML
   <?php if (\$latest): ?>
-  <div class="$pre-header-rail" aria-label="{$Le['latest_aria']}">
-    <span class="$pre-rail-label">{$Le['latest']}:</span>
-    <div class="$pre-rail-list">
+  <div class="{$pre}-header-rail" aria-label="{$Le['latest_aria']}">
+    <span class="{$pre}-rail-label">{$Le['latest']}:</span>
+    <div class="{$pre}-rail-list">
       <?php foreach (\$latest as \$p): ?>
-        <a class="$pre-rail-item" href="\$base/<?=htmlspecialchars(\$p['slug'] ?? '')?>"><?=htmlspecialchars(\$p['title'] ?? '')?></a>
+        <a class="{$pre}-rail-item"
+           href="<?php echo \$base; ?>/<?php echo htmlspecialchars(\$p['slug'] ?? ''); ?>">
+          <?php echo htmlspecialchars(\$p['title'] ?? ''); ?>
+        </a>
       <?php endforeach; ?>
     </div>
   </div>
   <?php endif; ?>
-HTML : '';
+HTML;
+    }
 
-        // IMPORTANT: build helpers & data as before, but CAPTURE the <header> markup into $cw_header_html.
-        return <<<PHP
+    return <<<PHP
 <?php
 /** @var array \$config */
 \$site = \$config['site_name'] ?? 'CamelWay';
 \$shop = \$config['shop_url']  ?? 'https://camelway.eu/';
 \$base = \$config['base_url']  ?? '/';
 
-/* ---------- Post + Intro helpers (JSON-only; shared by header + home + article) ---------- */
-
-/* Guard every helper with function_exists to avoid re-declare issues. */
+/* ---------- Post + Intro helpers (unchanged) ---------- */
 if (!function_exists('cw_locate_data_bases')) {
     function cw_locate_data_bases(array \$config): array {
         \$bases = [];
@@ -271,14 +275,12 @@ if (!function_exists('cw_read_json_assoc')) {
     }
 }
 if (!function_exists('cw_is_list')) {
-    function cw_is_list(array \$a): bool {
-        return array_values(\$a) === \$a; // true for sequential numeric keys starting at 0
-    }
+    function cw_is_list(array \$a): bool { return array_values(\$a) === \$a; }
 }
 if (!function_exists('cw_standardize_post')) {
     function cw_standardize_post(array \$x, string \$fallbackSlug, int \$mtime): array {
         \$slug = (string) (\$x['slug'] ?? \$fallbackSlug);
-        \$slug = ltrim(preg_replace('/\\.[a-z0-9]+$/i','', \$slug), '/'); // drop extension
+        \$slug = ltrim(preg_replace('/\\.[a-z0-9]+$/i','', \$slug), '/');
         return [
             'title'        => (string)(\$x['title'] ?? \$slug),
             'slug'         => \$slug,
@@ -290,23 +292,15 @@ if (!function_exists('cw_standardize_post')) {
 }
 if (!function_exists('cw_posts_all')) {
     function cw_posts_all(array \$config): array {
-        \$bases = cw_locate_data_bases(\$config);
-        \$checked = [];
-
-        // 1) Try index files in each base
+        \$bases = cw_locate_data_bases(\$config); \$checked = [];
         foreach (\$bases as \$base) {
             foreach (['posts.json','posts/posts.json'] as \$idx) {
                 \$file = rtrim(\$base,'/') . '/' . \$idx; \$checked[] = \$file;
                 if (is_file(\$file)) {
                     \$j = cw_read_json_assoc(\$file);
                     if (!is_array(\$j)) continue;
-                    if (isset(\$j['posts']) && is_array(\$j['posts'])) {
-                        \$arr = \$j['posts'];
-                    } elseif (cw_is_list(\$j)) {
-                        \$arr = \$j; // plain array of posts
-                    } else {
-                        continue;
-                    }
+                    \$arr = isset(\$j['posts']) && is_array(\$j['posts']) ? \$j['posts'] : (cw_is_list(\$j) ? \$j : null);
+                    if (!\$arr) continue;
                     \$out = [];
                     foreach (\$arr as \$row) {
                         if (!is_array(\$row)) continue;
@@ -322,8 +316,6 @@ if (!function_exists('cw_posts_all')) {
                 }
             }
         }
-
-        // 2) Fallback: scan posts directories for JSON files
         foreach (\$bases as \$base) {
             foreach (['posts','articles','content/posts'] as \$dirRel) {
                 \$dir = rtrim(\$base,'/') . '/' . \$dirRel; \$checked[] = \$dir;
@@ -343,38 +335,27 @@ if (!function_exists('cw_posts_all')) {
                 }
             }
         }
-
-        if (!empty(\$checked)) {
-            @error_log('TemplateSynth: no posts found. Checked: '.implode(', ', \$checked));
-        }
+        if (!empty(\$checked)) { @error_log('TemplateSynth: no posts found. Checked: '.implode(', ', \$checked)); }
         return [];
     }
 }
-
-/* ---- Intro helpers (shared by home.php + article.php) ---- */
 if (!function_exists('cw_intro_clip')) {
     function cw_intro_clip(string \$text, int \$max = 160, int \$min = 150, bool \$withEllipsis = false): string {
         \$enc = 'UTF-8';
-        // Decode HTML entities, strip tags, collapse whitespace
         \$decoded   = html_entity_decode(\$text, ENT_QUOTES | ENT_SUBSTITUTE, \$enc);
         \$stripped  = strip_tags(\$decoded);
         \$collapsed = preg_replace('/\\s+/u', ' ', \$stripped);
         if (\$collapsed === null) \$collapsed = \$stripped;
         \$clean = trim(\$collapsed);
         if (\$clean === '') return '';
-
-        // If already short enough, return as-is (no ellipsis by default)
         if (function_exists('mb_strlen')) {
             if (mb_strlen(\$clean, \$enc) <= \$max) return \$clean;
-
-            // Backtrack to a word boundary between min..max
             \$breakPos = null;
             for (\$i = \$max; \$i >= \$min; \$i--) {
                 \$ch = mb_substr(\$clean, \$i, 1, \$enc);
                 if (preg_match('/\\s/u', \$ch)) { \$breakPos = \$i; break; }
             }
             if (\$breakPos === null) {
-                // Fallback: last space anywhere before \$max
                 \$piece = mb_substr(\$clean, 0, \$max, \$enc);
                 \$pos   = mb_strrpos(\$piece, ' ', 0, \$enc);
                 \$breakPos = (\$pos !== false) ? \$pos : \$max;
@@ -392,11 +373,7 @@ if (!function_exists('cw_intro_clip')) {
             }
             \$out = substr(\$clean, 0, \$breakPos);
         }
-
-        // Tidy end punctuation
         \$out = rtrim(\$out, " ,.;:–-");
-
-        // Optional ellipsis (for cards): keep total length ≤ \$max
         if (\$withEllipsis) {
             \$ell = '…';
             if (function_exists('mb_strlen')) {
@@ -421,7 +398,6 @@ if (!function_exists('cw_html_paragraphs')) {
         if (!preg_match_all('/<p\\b[^>]*>(.*?)<\\/p>/is', \$html, \$m)) return [];
         \$out = [];
         foreach (\$m[1] as \$seg) { \$out[] = trim(strip_tags(\$seg)); }
-        // Remove empties (explicit callback – no arrow fn)
         \$filtered = array_filter(\$out, function(\$x){ return \$x !== ''; });
         return array_values(\$filtered);
     }
@@ -429,7 +405,6 @@ if (!function_exists('cw_html_paragraphs')) {
 if (!function_exists('cw_markdown_paragraphs')) {
     function cw_markdown_paragraphs(string \$md): array {
         if (\$md === '') return [];
-        // drop front matter if any
         if (substr(\$md, 0, 4) === "---\n") {
             \$end = strpos(\$md, "\n---", 4);
             if (\$end !== false) { \$md = substr(\$md, \$end + 4); }
@@ -452,7 +427,6 @@ if (!function_exists('cw_intro_from_fields')) {
         \$paras = [];
         if (\$bodyHtml !== '') \$paras = cw_html_paragraphs(\$bodyHtml);
         if (empty(\$paras) && \$bodyMd !== '') \$paras = cw_markdown_paragraphs(\$bodyMd);
-        // prefer 2nd paragraph; fallback to 1st; finally summary/title
         \$p2 = isset(\$paras[1]) ? \$paras[1] : (isset(\$paras[0]) ? \$paras[0] : '');
         if (\$p2 === '') \$p2 = (string) (\$post['summary'] ?? (\$post['title'] ?? ''));
         return cw_intro_clip(\$p2, 160, 150, \$withEllipsis);
@@ -481,29 +455,29 @@ if (!function_exists('cw_intro_for_slug')) {
     }
 }
 
-/* Build 'latest' preview safely */
+/* Build latest preview */
 \$latest = array_slice(cw_posts_all(\$config), 0, 10);
 
-/* ---- CAPTURE the visual header HTML for later output in <body> ---- */
+/* Capture the header HTML (only output later, after <body>) */
 ob_start();
 ?>
-<header class="$pre-header">
-  <div class="$pre-container $pre-header-bar">
-    <a class="$pre-brand" href="<?=\$base?>"><?=htmlspecialchars(\$site)?></a>
-    <nav class="$pre-nav">
-      <a class="$pre-nav-link" href="<?=\$base?>">{$Le['home']}</a>
-      <a class="$pre-nav-link" href="<?=\$base?>?page=1#recent">{$Le['recent']}</a>
-      <a class="$pre-button" href="<?=\$shop?>">{$Le['shop_now']} <?=(function_exists('icon') ? icon('arrow-right') : '→')?></a>
+<header class="{$pre}-header">
+  <div class="{$pre}-container {$pre}-header-bar">
+    <a class="{$pre}-brand" href="<?php echo \$base; ?>"><?php echo htmlspecialchars(\$site); ?></a>
+    <nav class="{$pre}-nav">
+      <a class="{$pre}-nav-link" href="<?php echo \$base; ?>">{{$Le['home']}}</a>
+      <a class="{$pre}-nav-link" href="<?php echo \$base; ?>?page=1#recent">{{$Le['recent']}}</a>
+      <a class="{$pre}-button" href="<?php echo \$shop; ?>">{{$Le['shop_now']}} <?php echo (function_exists('icon') ? icon('arrow-right') : '→'); ?></a>
     </nav>
   </div>
-  {$rail}
+{$railBlock}
 </header>
 <?php
-// Expose captured markup to templates; nothing is echoed yet.
-$cw_header_html = ob_get_clean();
+\$cw_header_html = ob_get_clean();
 ?>
 PHP;
-    }
+}
+
 
     private function ctaPhp(string $pre, array $copy, string $L_shop): string
     {
