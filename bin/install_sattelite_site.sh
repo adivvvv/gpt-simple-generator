@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Quick LEMP + auto-gpt-blog installer for Ubuntu 24.04
-# Usage: sudo bash install_camelsite.sh <linux_user> <domain> <lang>
-# Example: sudo bash install_camelsite.sh camelmilk1 camel-milk.co.uk en
+# Usage: sudo bash install_settelite_site.sh <linux_user> <domain> <lang>
+# Example: sudo bash install_settelite_site.sh myresearchblog myresearchblog.co.uk en
 
 set -euo pipefail
 
@@ -9,7 +9,7 @@ if [[ $EUID -ne 0 ]]; then echo "Please run as root (use sudo)."; exit 1; fi
 if [[ $# -ne 3 ]]; then echo "Usage: $0 <linux_user> <domain> <lang>"; exit 1; fi
 
 SYSUSER="$1"
-DOMAIN_RAW="$2"   # e.g. camel-milk.co.uk OR www.camel-milk.co.uk
+DOMAIN_RAW="$2"
 BLOG_LANG="$3"
 
 # Canonical host logic: if input starts with "www." => canonical is www; else canonical is bare
@@ -31,7 +31,7 @@ ENV_EXAMPLE="${APP_DIR}/.env.example"
 NGX_AVAIL="/etc/nginx/sites-available/${CANON}"
 NGX_ENABLED="/etc/nginx/sites-enabled/${CANON}"
 SSL_SNIPPET="/etc/nginx/snippets/ssl-params.conf"
-API_KEY="XXXX"  # Replace with your actual Feed API key
+API_KEY="XXXX-REPLACE-WITH-YOUR-OWN-KEY-XXXX"  # get your free key by setting up your feed service https://github.com/adivvvv/gpt-simple-generator
 EMAIL="admin@${CANON#www.}"  # admin@rootdomain
 
 export DEBIAN_FRONTEND=noninteractive
@@ -75,7 +75,6 @@ chown -R "${SYSUSER}:www-data" "${APP_DIR}"
 find "${APP_DIR}/storage" -type d -exec chmod 2775 {} \; || true
 find "${APP_DIR}/storage" -type f -exec chmod 664 {} \; || true
 find "${APP_DIR}/data" -type d -exec chmod 2775 {} \; || true
-# If posts.json already exists, keep it; otherwise create an empty index with group-writable perms
 if [[ ! -f "${APP_DIR}/data/posts.json" ]]; then
   echo '{"posts":[]}' > "${APP_DIR}/data/posts.json"
 fi
@@ -84,8 +83,7 @@ chmod 664 "${APP_DIR}/data/posts.json" || true
 echo "==> configure .env…"
 if [[ ! -f "${ENV_FILE}" && -f "${ENV_EXAMPLE}" ]]; then cp "${ENV_EXAMPLE}" "${ENV_FILE}"; fi
 
-# Set required envs
-sed -i "s|^FEED_BASE_URL=.*|FEED_BASE_URL=https://mysite.com|g" "${ENV_FILE}" || true
+sed -i "s|^FEED_BASE_URL=.*|FEED_BASE_URL=https://feed.mydomain.com|g" "${ENV_FILE}" || true
 if grep -q "^FEED_API_KEY=" "${ENV_FILE}"; then
   sed -i "s|^FEED_API_KEY=.*|FEED_API_KEY=${API_KEY}|g" "${ENV_FILE}"
 else
@@ -165,7 +163,6 @@ server {
 NGINX
 
 ln -sf "${NGX_AVAIL}" "${NGX_ENABLED}"
-# Disable default site
 [[ -e /etc/nginx/sites-enabled/default ]] && rm -f /etc/nginx/sites-enabled/default
 
 echo "==> test + reload nginx (HTTP only)…"
@@ -175,10 +172,10 @@ systemctl reload nginx
 echo "==> obtain Let’s Encrypt certificate (for ${CANON}, ${ALT})…"
 mkdir -p "${WEBROOT}/.well-known/acme-challenge"
 certbot certonly --webroot -w "${WEBROOT}" \
+  --cert-name "${CANON}" --expand \
   -d "${CANON}" -d "${ALT}" \
   --agree-tos -m "${EMAIL}" --no-eff-email --non-interactive
 
-# TLS params snippet (avoids /etc/letsencrypt/options-ssl-nginx.conf dependency)
 echo "==> write nginx TLS params snippet…"
 cat > "${SSL_SNIPPET}" <<'SNIP'
 ssl_protocols TLSv1.2 TLSv1.3;
@@ -186,21 +183,15 @@ ssl_prefer_server_ciphers off;
 ssl_session_timeout 1d;
 ssl_session_cache shared:SSL:50m;
 ssl_session_tickets off;
-
-# Reasonable defaults (Mozilla intermediate-ish)
 ssl_ciphers HIGH:!aNULL:!MD5;
-
-# Security headers (minimal and safe for a blog)
 add_header X-Content-Type-Options nosniff;
 add_header Referrer-Policy strict-origin-when-cross-origin;
 add_header X-Frame-Options SAMEORIGIN;
 SNIP
 
-# Build canonical redirect target
+# Use the same lineage name as the primary domain we requested first.
+CERT_ROOT="${CANON}"
 REDIR_TARGET="https://${CANON}\$request_uri"
-
-# The live cert path is anchored at the base/root domain (strip "www.")
-CERT_ROOT="${CANON#www.}"
 
 echo "==> replace HTTP vhosts with HTTPS + canonical redirects…"
 cat > "${NGX_AVAIL}" <<NGINX
@@ -282,11 +273,56 @@ find "${APP_DIR}/storage" -type f -exec chmod 0664 {} \; 2>/dev/null || true
 chmod -R +x ${APP_DIR}/bin
 
 # -------------------------
-# systemd service + timers
+# Certbot auto-renew (nightly) + safe Nginx reload on success
+# -------------------------
+echo "==> configure nightly certbot renew (single server-level timer)…"
+# Disable vendor timer to avoid double scheduling; our timer runs nightly.
+systemctl disable --now certbot.timer 2>/dev/null || true
+
+# Install deploy hook: reload Nginx only AFTER a successful renewal; coalesce via flock.
+HOOK_DIR="/etc/letsencrypt/renewal-hooks/deploy"
+HOOK="${HOOK_DIR}/000-reload-nginx.sh"
+mkdir -p "${HOOK_DIR}"
+cat > "${HOOK}" <<'HOOK'
+#!/usr/bin/env bash
+set -euo pipefail
+# This runs once per successfully renewed certificate.
+# Use flock so multiple cert renewals trigger at most one reload.
+exec flock -n /run/certbot-nginx-reload.lock -c "systemctl reload nginx"
+HOOK
+chmod 755 "${HOOK}"
+
+# Nightly certbot renew (03:00 + up to 2h randomized delay to stagger across servers)
+cat > /etc/systemd/system/certbot-nightly.service <<'UNIT'
+[Unit]
+Description=Nightly certbot renew (all certificates)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/certbot renew -q
+UNIT
+
+cat > /etc/systemd/system/certbot-nightly.timer <<'UNIT'
+[Unit]
+Description=Nightly certbot renew (randomized)
+
+[Timer]
+OnCalendar=03:00
+RandomizedDelaySec=7200
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UNIT
+
+systemctl daemon-reload
+systemctl enable --now certbot-nightly.timer
+
+# -------------------------
+# systemd service + timers (content generation)
 # -------------------------
 echo "==> install systemd service + two randomized timers (AM/PM)…"
 
-# Create a safe identifier using username + domain (normalized)
 CANON_SAFE="$(echo "${CANON,,}" | sed -E 's/[^a-z0-9]+/-/g; s/^-+|-+$//g')"
 UNIT_BASE="auto-gpt-blog-article-${SYSUSER}-${CANON_SAFE}"
 
@@ -340,6 +376,6 @@ systemctl daemon-reload
 systemctl enable --now "${UNIT_BASE}-am.timer" "${UNIT_BASE}-pm.timer"
 
 echo "==> timers active (next runs shown):"
-systemctl list-timers | grep "${UNIT_BASE}" || true
+systemctl list-timers | grep -E "certbot-nightly|${UNIT_BASE}" || true
 
 echo "==> done. Visit: https://${CANON}"
