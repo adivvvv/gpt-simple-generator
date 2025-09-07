@@ -221,7 +221,17 @@ $pag
 .$pre-footer-note{color:var(--cw-muted);margin:0}
 
 .icon{vertical-align:middle}
+
+/* Hide rail label on narrow screens */
 @media (max-width:640px){ .{$pre}-rail-label{display:none} }
+
+/* Header-only tweaks for ≤750px (sm and smaller) */
+@media (max-width:750px){
+  .{$pre}-brand{display:none}
+  .{$pre}-header .{$pre}-nav{gap:.5rem}
+  .{$pre}-header .{$pre}-nav-link{font-size:0.7em;padding:.175rem .35rem}
+  .{$pre}-header .{$pre}-button{font-size:0.7em;padding:.35rem .63rem}
+}
 CSS;
     }
 
@@ -246,6 +256,11 @@ CSS;
   <?php endif; ?>
 HTML;
         }
+
+        // Inject pre-escaped labels as literal text into the generated PHP template
+        $lblHome   = $Le['home'];
+        $lblRecent = $Le['recent'];
+        $lblShop   = $Le['shop_now'];
 
         return <<<PHP
 <?php
@@ -461,13 +476,13 @@ if (!function_exists('cw_intro_for_slug')) {
 /* Capture the header HTML (only output later, after <body>) */
 ob_start();
 ?>
-<header class="{$pre}-header">
-  <div class="{$pre}-container {$pre}-header-bar">
-    <a class="{$pre}-brand" href="<?php echo \$base; ?>"><?php echo htmlspecialchars(\$site); ?></a>
-    <nav class="{$pre}-nav">
-      <a class="{$pre}-nav-link" href="<?php echo \$base; ?>"><?= '{$Le['home']}' ?></a>
-      <a class="{$pre}-nav-link" href="<?php echo \$base; ?>?page=1#recent"><?= '{$Le['recent']}' ?></a>
-      <a class="{$pre}-button" href="<?php echo \$shop; ?>"><?= '{$Le['shop_now']}' ?> <?php echo (function_exists('icon') ? icon('arrow-right') : '→'); ?></a>
+<header class="<?php echo "{$pre}-header"; ?>">
+  <div class="<?php echo "{$pre}-container {$pre}-header-bar"; ?>">
+    <a class="<?php echo "{$pre}-brand"; ?>" href="<?php echo \$base; ?>"><?php echo htmlspecialchars(\$site); ?></a>
+    <nav class="<?php echo "{$pre}-nav"; ?>">
+      <a class="<?php echo "{$pre}-nav-link"; ?>" href="<?php echo \$base; ?>"><?= '$lblHome' ?></a>
+      <a class="<?php echo "{$pre}-nav-link"; ?>" href="<?php echo \$base; ?>?page=1#recent"><?= '$lblRecent' ?></a>
+      <a class="<?php echo "{$pre}-button"; ?>" href="<?php echo \$shop; ?>"><?= '$lblShop' ?> <?php echo (function_exists('icon') ? icon('arrow-right') : '→'); ?></a>
     </nav>
   </div>
 {$railBlock}
