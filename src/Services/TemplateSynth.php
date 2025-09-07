@@ -352,25 +352,66 @@ if (!function_exists('cw_posts_all')) {
 
 /* ---- Intro helpers (shared by home.php + article.php) ---- */
 if (!function_exists('cw_intro_clip')) {
-    function cw_intro_clip(string \$text, int \$max = 160): string {
-        // Decode entities, collapse whitespace
-        \$decoded = html_entity_decode(\$text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
-        \$collapsed = preg_replace('/\\s+/u', ' ', \$decoded);
-        if (\$collapsed === null) { \$collapsed = \$decoded; }
+    function cw_intro_clip(string \$text, int \$max = 160, int \$min = 150, bool \$withEllipsis = false): string {
+        \$enc = 'UTF-8';
+        // Decode HTML entities, strip tags, collapse whitespace
+        \$decoded   = html_entity_decode(\$text, ENT_QUOTES | ENT_SUBSTITUTE, \$enc);
+        \$stripped  = strip_tags(\$decoded);
+        \$collapsed = preg_replace('/\\s+/u', ' ', \$stripped);
+        if (\$collapsed === null) \$collapsed = \$stripped;
         \$clean = trim(\$collapsed);
         if (\$clean === '') return '';
+
+        // If already short enough, return as-is (no ellipsis by default)
         if (function_exists('mb_strlen')) {
-            if (mb_strlen(\$clean, 'UTF-8') <= \$max) return \$clean;
-            \$cut = mb_substr(\$clean, 0, \$max, 'UTF-8');
+            if (mb_strlen(\$clean, \$enc) <= \$max) return \$clean;
+
+            // Backtrack to a word boundary between min..max
+            \$breakPos = null;
+            for (\$i = \$max; \$i >= \$min; \$i--) {
+                \$ch = mb_substr(\$clean, \$i, 1, \$enc);
+                if (preg_match('/\\s/u', \$ch)) { \$breakPos = \$i; break; }
+            }
+            if (\$breakPos === null) {
+                // Fallback: last space anywhere before \$max
+                \$piece = mb_substr(\$clean, 0, \$max, \$enc);
+                \$pos   = mb_strrpos(\$piece, ' ', 0, \$enc);
+                \$breakPos = (\$pos !== false) ? \$pos : \$max;
+            }
+            \$out = mb_substr(\$clean, 0, \$breakPos, \$enc);
         } else {
             if (strlen(\$clean) <= \$max) return \$clean;
-            \$cut = substr(\$clean, 0, \$max);
+            \$breakPos = \$max;
+            for (\$i = \$max; \$i >= \$min; \$i--) {
+                if (isset(\$clean[\$i]) && \$clean[\$i] === ' ') { \$breakPos = \$i; break; }
+            }
+            if (\$breakPos === \$max) {
+                \$pos = strrpos(substr(\$clean, 0, \$max), ' ');
+                if (\$pos !== false) \$breakPos = \$pos;
+            }
+            \$out = substr(\$clean, 0, \$breakPos);
         }
-        // Avoid chopping the last word
-        if (preg_match('/^(.+?)\\b[\\s\\S]*$/u', \$cut, \$m)) {
-            \$cut = \$m[1];
+
+        // Tidy end punctuation
+        \$out = rtrim(\$out, " ,.;:–-");
+
+        // Optional ellipsis (for cards): keep total length ≤ \$max
+        if (\$withEllipsis) {
+            \$ell = '…';
+            if (function_exists('mb_strlen')) {
+                if (mb_strlen(\$out, \$enc) + 1 > \$max) {
+                    \$out = mb_substr(\$out, 0, max(0, \$max - 1), \$enc);
+                    \$out = rtrim(\$out, " ,.;:–-");
+                }
+            } else {
+                if (strlen(\$out) + 1 > \$max) {
+                    \$out = substr(\$out, 0, max(0, \$max - 1));
+                    \$out = rtrim(\$out, " ,.;:–-");
+                }
+            }
+            \$out .= \$ell;
         }
-        return rtrim(\$cut, " ,.;:–-").'…';
+        return \$out;
     }
 }
 if (!function_exists('cw_html_paragraphs')) {
@@ -378,10 +419,8 @@ if (!function_exists('cw_html_paragraphs')) {
         if (\$html === '') return [];
         if (!preg_match_all('/<p\\b[^>]*>(.*?)<\\/p>/is', \$html, \$m)) return [];
         \$out = [];
-        foreach (\$m[1] as \$seg) {
-            \$out[] = trim(strip_tags(\$seg));
-        }
-        // Remove empties
+        foreach (\$m[1] as \$seg) { \$out[] = trim(strip_tags(\$seg)); }
+        // Remove empties (explicit callback – no arrow fn)
         \$filtered = array_filter(\$out, function(\$x){ return \$x !== ''; });
         return array_values(\$filtered);
     }
@@ -392,9 +431,7 @@ if (!function_exists('cw_markdown_paragraphs')) {
         // drop front matter if any
         if (substr(\$md, 0, 4) === "---\n") {
             \$end = strpos(\$md, "\n---", 4);
-            if (\$end !== false) {
-                \$md = substr(\$md, \$end + 4);
-            }
+            if (\$end !== false) { \$md = substr(\$md, \$end + 4); }
         }
         \$parts = preg_split('/\\R{2,}/u', \$md);
         if (!is_array(\$parts)) \$parts = [];
@@ -408,7 +445,7 @@ if (!function_exists('cw_markdown_paragraphs')) {
     }
 }
 if (!function_exists('cw_intro_from_fields')) {
-    function cw_intro_from_fields(array \$post): string {
+    function cw_intro_from_fields(array \$post, bool \$withEllipsis = false): string {
         \$bodyHtml = (string) (\$post['body'] ?? '');
         \$bodyMd   = (string) (\$post['body_markdown'] ?? '');
         \$paras = [];
@@ -417,14 +454,14 @@ if (!function_exists('cw_intro_from_fields')) {
         // prefer 2nd paragraph; fallback to 1st; finally summary/title
         \$p2 = isset(\$paras[1]) ? \$paras[1] : (isset(\$paras[0]) ? \$paras[0] : '');
         if (\$p2 === '') \$p2 = (string) (\$post['summary'] ?? (\$post['title'] ?? ''));
-        return cw_intro_clip(\$p2, 160);
+        return cw_intro_clip(\$p2, 160, 150, \$withEllipsis);
     }
 }
 if (!function_exists('cw_load_post_json')) {
     function cw_load_post_json(array \$bases, string \$slug) {
         foreach (\$bases as \$base) {
             \$path = rtrim(\$base,'/') . '/posts/' . \$slug . '.json';
-            if (is_file(\$path)) { // fixed stray ')'
+            if (is_file(\$path)) {
                 \$j = cw_read_json_assoc(\$path);
                 if (is_array(\$j)) return \$j;
             }
@@ -433,13 +470,13 @@ if (!function_exists('cw_load_post_json')) {
     }
 }
 if (!function_exists('cw_intro_for_slug')) {
-    function cw_intro_for_slug(string \$slug, array \$config, string \$fallback = ''): string {
+    function cw_intro_for_slug(string \$slug, array \$config, string \$fallback = '', bool \$withEllipsis = true): string {
         if (\$slug !== '') {
             \$bases = cw_locate_data_bases(\$config);
             \$j = cw_load_post_json(\$bases, \$slug);
-            if (is_array(\$j)) return cw_intro_from_fields(\$j);
+            if (is_array(\$j)) return cw_intro_from_fields(\$j, \$withEllipsis);
         }
-        return cw_intro_clip(\$fallback, 160);
+        return cw_intro_clip(\$fallback, 160, 150, \$withEllipsis);
     }
 }
 
@@ -582,7 +619,7 @@ foreach (\$latestList as \$i => \$pItem) {
               <?php
                 // Use short intro (second paragraph clipped) from the full post file when possible.
                 \$intro = function_exists('cw_intro_for_slug')
-                    ? cw_intro_for_slug((string)(\$p['slug'] ?? ''), \$config, (string)(\$p['summary'] ?? ''))
+                    ? cw_intro_for_slug((string)(\$p['slug'] ?? ''), \$config, (string)(\$p['summary'] ?? ''), true)
                     : (string)(\$p['summary'] ?? '');
                 if (\$intro !== ''):
               ?>
@@ -648,9 +685,9 @@ PHP;
 \$atomHref = (\$config['base_url'] ?? '').'/atom.xml';
 \$cssver   = @filemtime(__DIR__ . '/../../public/assets/tailwind.css') ?: time();
 
-/* Meta description: short intro from 2nd paragraph (clip to 160). */
+/* Meta description: short intro from 2nd paragraph (clip to 160, no ellipsis). */
 if (function_exists('cw_intro_from_fields')) {
-    \$metaDesc = cw_intro_from_fields(\$post);
+    \$metaDesc = cw_intro_from_fields(\$post); // default is no ellipsis
 } else {
     \$metaDesc = (\$summary !== '') ? \$summary : (string)\$title;
 }
@@ -707,7 +744,7 @@ if (!empty(\$faqs) && is_array(\$faqs)) {
       <header class="$pre-article-header">
         <h1 class="$pre-article-title"><?=htmlspecialchars(\$title)?></h1>
         <?php
-          // Prefer saved summary if present; otherwise show computed intro under the title.
+          // Prefer saved summary if present; otherwise show computed intro under the title (no ellipsis).
           \$headerSummary = (\$summary !== '') ? \$summary : \$metaDesc;
           if (\$headerSummary):
         ?>
