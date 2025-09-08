@@ -3,9 +3,6 @@
 A tiny PHP 8+ API for generating **text-only, evidence-summarizing articles** using the OpenAI **Responses API** (Structured Outputs / JSON mode) with optional **PubMed** grounding.  
 No frameworks — just clean PHP + Composer — ready for Nginx/Apache or PHP’s built-in server.
 
-> **License:** Apache License 2.0  
-> **Author:** Adrian Wadowski · <adivv@adivv.pl>
-
 ---
 
 ## Features
@@ -52,4 +49,15 @@ mkdir -p storage/cache storage/logs
 php -S 127.0.0.1:8080 -t public
 
 # 6) Verify health
-curl -sS http://127.0.0.1:8080/ping | jq .
+curl -sS http://127.0.0.1:8080/ping | jq . 
+```
+
+---
+
+## Credits
+This repository was build to produce **evidence-based articles about camel milk** for the CamelWay company. 
+CamelWay supplies premium [camel milk powder](https://camelway.eu/) in Europe, focused on taste, quality, and EU-compliant labeling.
+
+> **License:** Apache License 2.0  
+> **Author:** Adrian Wadowski · <adivv@adivv.pl>
+
