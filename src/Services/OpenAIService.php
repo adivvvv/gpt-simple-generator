@@ -71,9 +71,6 @@ final class OpenAIService
         $system = implode("\n", [
             "You are a careful scientific editor writing in {$langName}.",
             "SUBJECT (must be copied verbatim into the 'subject' field in the JSON output): {$subject}",
-            "CRITICAL LANGUAGE RULES:",
-            "- The ENTIRE OUTPUT (title, summary, body_markdown, faq, tags) MUST be in {$langName} ONLY.",
-            "- If the SUBJECT or any inputs are not in {$langName}, first translate them to {$langName} and then write the article.",
             "Goals:",
             "- Write an article specifically about the SUBJECT above.",
             "- Start with a UNIQUE, non-generic introduction using the lead style: {$lead}.",
