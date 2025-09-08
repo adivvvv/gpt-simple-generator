@@ -23,12 +23,32 @@ final class OpenAIService
         ]);
     }
 
+    /** Map ISO-639-1 code -> human-readable language name (English) */
+    private function langName(string $lang): string
+    {
+        $map = [
+            'en' => 'English',
+            'de' => 'German',
+            'fr' => 'French',
+            'it' => 'Italian',
+            'es' => 'Spanish',
+            'sv' => 'Swedish',
+            'fi' => 'Finnish',
+            'nl' => 'Dutch',
+            'pl' => 'Polish',
+            'cs' => 'Czech',
+        ];
+        $key = strtolower($lang);
+        return $map[$key] ?? $lang;
+    }
+
     /**
      * Generate a full article as strict JSON per article.schema.json
      */
     public function generateArticle(array $payload, array $refs, array $schema): array
     {
         $lang       = (string)$payload['lang'];
+        $langName   = $this->langName($lang);
         $subject    = (string)($payload['subject'] ?? '');
         $lead       = (string)($payload['leadStyle'] ?? 'surprising-stat');
         $minSp      = (int)($payload['minSentencesPerParagraph'] ?? 4);
@@ -49,8 +69,11 @@ final class OpenAIService
             : "Inline citations policy: include AT MOST {$maxInline} total inline PMIDs in the entire article (not per paragraph). Never repeat the same PMID, do not add PMIDs in FAQ. Use only from this allowed set: [" . implode(',', $allowedPmids) . "].";
 
         $system = implode("\n", [
-            "You are a careful scientific editor writing in {$lang}.",
+            "You are a careful scientific editor writing in {$langName}.",
             "SUBJECT (must be copied verbatim into the 'subject' field in the JSON output): {$subject}",
+            "CRITICAL LANGUAGE RULES:",
+            "- The ENTIRE OUTPUT (title, summary, body_markdown, faq, tags) MUST be in {$langName} ONLY.",
+            "- If the SUBJECT or any inputs are not in {$langName}, first translate them to {$langName} and then write the article.",
             "Goals:",
             "- Write an article specifically about the SUBJECT above.",
             "- Start with a UNIQUE, non-generic introduction using the lead style: {$lead}.",
@@ -62,7 +85,7 @@ final class OpenAIService
             $banListText,
             "Constraints:",
             "- Text-only. No images, no tables.",
-            "- Use consistent terminology in {$lang}.",
+            "- Use consistent terminology in {$langName}.",
             "- If you include PMIDs inline, cite like [PMID:12345678].",
             "",
             "VERY IMPORTANT: Return ONLY a single JSON object that EXACTLY matches the provided JSON schema. Do not include any extra keys. Do not echo the input payload."
@@ -70,7 +93,8 @@ final class OpenAIService
 
         $userJson = json_encode([
             'task' => 'write_article',
-            'language' => $lang,
+            // Pass readable name here too to avoid ambiguity
+            'language' => $langName,
             'subject' => $subject,
             'keywords' => $payload['keywords'],
             'styleFlags' => $payload['styleFlags'],
@@ -110,15 +134,16 @@ final class OpenAIService
         );
     }
 
-    /** Ideas generator unchanged (kept tolerant on shapes) */
+    /** Ideas generator unchanged (kept tolerant on shapes), now uses readable language name in prompts */
     public function generateIdeas(string $lang, array $seeds, int $count): array
     {
         $schema = json_decode(file_get_contents(__DIR__ . '/../../schema/ideas.schema.json'), true);
+        $langName = $this->langName($lang);
 
-        $system = "Generate unique, high-intent SEO ideas in {$lang} about camel milk. Return ONLY JSON matching schema; no duplicates; diverse angles.";
+        $system = "Generate unique, high-intent SEO ideas in {$langName} about camel milk. Return ONLY JSON matching schema; no duplicates; diverse angles.";
         $userJson = json_encode([
             'task' => 'seed_ideas',
-            'language' => $lang,
+            'language' => $langName,
             'seed_topics' => $seeds,
             'count' => $count
         ], JSON_UNESCAPED_UNICODE);
@@ -164,7 +189,8 @@ final class OpenAIService
             ]
         ];
 
-        $system = "Translate the given subject/title into {$lang}. Preserve meaning, brevity, and key terms (e.g., 'camel milk'). Return ONLY JSON with a single field 'subject'.";
+        $langName = $this->langName($lang);
+        $system = "Translate the given subject/title into {$langName}. Preserve meaning, brevity, and key terms (e.g., 'camel milk'). Return ONLY JSON with a single field 'subject'.";
         $inputBlocks = [
             ['role'=>'system','content'=>[['type'=>'input_text','text'=>$system]]],
             ['role'=>'user','content'=>[['type'=>'input_text','text'=>"SUBJECT:\n".$subject]]],
@@ -196,6 +222,8 @@ final class OpenAIService
             throw new \RuntimeException('template_plan.schema.json missing');
         }
 
+        $langName = $this->langName($lang);
+
         $system = implode("\n", [
             "You are a senior web theme designer.",
             "Goal: Propose a small design system for a text-only, image-free, cookie-free, Tailwind-like site.",
@@ -210,14 +238,14 @@ final class OpenAIService
             "- type_scale: base_px(15..19), leading(1.45..1.8), measure_ch(58..76).",
             "- layout: header_variant(rail|stacked|double), hero_variant(center-thin|left-stacked|boxed),",
             "          card_variant(soft|outlined|lined), pagination_variant(minimal|pill|boxed), icons(svg|unicode).",
-            "- copy: hero_title, hero_subtitle, cta_label (language: {$lang}).",
+            "- copy: hero_title, hero_subtitle, cta_label (language: {$langName}).",
             "- No external assets or remote fonts. No JS. Text-only.",
             "Return ONLY JSON per schema; no explanations."
         ]);
 
         $user = [
             'task'       => 'template_plan',
-            'language'   => $lang,
+            'language'   => $langName,
             'seed'       => $seed,
             'styleFlags' => $styleFlags
         ];

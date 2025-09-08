@@ -48,9 +48,14 @@ final class GenerateController
             }
             if ($lang !== 'en') {
                 $translator = new OpenAIService();
-                $subjectTr = $translator->translateSubject($subject, $lang);
-                if (is_string($subjectTr) && $subjectTr !== '') {
-                    $subject = $subjectTr;
+                try {
+                    $subjectLocalized = $translator->translateSubject($subject, $lang);
+                    if (is_string($subjectLocalized) && $subjectLocalized !== '') {
+                        $subject = $subjectLocalized;
+                    }
+                } catch (\Throwable $e) {
+                    // non-fatal: keep original subject, but log
+                    \App\Support\Logger::error('subject localization failed', ['err'=>$e->getMessage(), 'lang'=>$lang]);
                 }
             }
         }
